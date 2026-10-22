@@ -1,0 +1,346 @@
+diff --git a/androidApp/src/main/kotlin/it/fast4x/riplay/ui/components/themed/MediaItemMenu.kt b/androidApp/src/main/kotlin/it/fast4x/riplay/ui/components/themed/MediaItemMenu.kt
+index 4c43e2a..bb65591 100644
+--- a/androidApp/src/main/kotlin/it/fast4x/riplay/ui/components/themed/MediaItemMenu.kt
++++ b/androidApp/src/main/kotlin/it/fast4x/riplay/ui/components/themed/MediaItemMenu.kt
+@@ -143,6 +143,7 @@ import it.fast4x.riplay.utils.removeFromOnlineLikedSong
+ import it.fast4x.riplay.utils.setRingtoneSmart
+ import kotlinx.serialization.ExperimentalSerializationApi
+ import timber.log.Timber
++import it.fast4x.riplay.utils.downloadSongToDevice
+ 
+ @ExperimentalSerializationApi
+ @ExperimentalTextApi
+@@ -1582,6 +1583,39 @@ fun MediaItemMenu(
+                             showFastShare = true
+                         }
+                     )
++
++                    MenuEntry(
++                        icon = R.drawable.download,
++                        text = stringResource(R.string.download_to_device),
++                        onClick = {
++                            onDismiss()
++                            val appCtx = context.applicationContext
++                            SmartMessage(
++                                appCtx.getString(R.string.download_started),
++                                type = PopupType.Info,
++                                context = appCtx
++                            )
++                            // Not tied to the menu's composition: it keeps running after the menu closes
++                            CoroutineScope(Dispatchers.IO).launch {
++                                appCtx.downloadSongToDevice(mediaItem)
++                                    .onSuccess {
++                                        SmartMessage(
++                                            appCtx.getString(R.string.download_completed),
++                                            type = PopupType.Success,
++                                            context = appCtx
++                                        )
++                                    }
++                                    .onFailure {
++                                        Timber.e(it, "downloadSongToDevice ${mediaItem.mediaId}")
++                                        SmartMessage(
++                                            appCtx.getString(R.string.download_failed),
++                                            type = PopupType.Error,
++                                            context = appCtx
++                                        )
++                                    }
++                            }
++                        }
++                    )
+                 }
+ 
+                 if (!isLocal && songSaved > 0) {
+diff --git a/androidApp/src/main/kotlin/it/fast4x/riplay/utils/SongDownloadUtils.kt b/androidApp/src/main/kotlin/it/fast4x/riplay/utils/SongDownloadUtils.kt
+new file mode 100644
+index 0000000..06fa688
+--- /dev/null
++++ b/androidApp/src/main/kotlin/it/fast4x/riplay/utils/SongDownloadUtils.kt
+@@ -0,0 +1,119 @@
++package it.fast4x.riplay.utils
++
++import android.content.ContentValues
++import android.content.Context
++import android.media.MediaScannerConnection
++import android.net.Uri
++import android.os.Environment as AndroidEnvironment
++import android.provider.MediaStore
++import androidx.media3.common.MediaItem
++import it.fast4x.environment.utils.AudioStreamDownloader
++import kotlinx.coroutines.Dispatchers
++import kotlinx.coroutines.withContext
++import java.io.File
++import java.io.FileOutputStream
++
++private const val DOWNLOAD_FOLDER = "RiPlay"
++
++/**
++ * Downloads the audio of an online [mediaItem] and saves it as a local file in Music/RiPlay.
++ * The on-device library already observes MediaStore, so the song shows up there by itself.
++ */
++suspend fun Context.downloadSongToDevice(
++    mediaItem: MediaItem,
++    onProgress: (Int) -> Unit = {},
++): Result<Uri> = withContext(Dispatchers.IO) {
++    runCatching {
++        val track = AudioStreamDownloader.resolveBestAudio(mediaItem.mediaId).getOrThrow()
++
++        val title = mediaItem.mediaMetadata.title?.toString() ?: mediaItem.mediaId
++        val artist = mediaItem.mediaMetadata.artist?.toString()
++        val album = mediaItem.mediaMetadata.albumTitle?.toString()
++        val fileName = safeFileName(listOfNotNull(artist, title).joinToString(" - ")) +
++                ".${track.extension}"
++
++        var lastPercent = -1
++        val progress: (Long, Long) -> Unit = { done, total ->
++            if (total > 0) {
++                val percent = (done * 100 / total).toInt()
++                if (percent != lastPercent) { lastPercent = percent; onProgress(percent) }
++            }
++        }
++
++        if (isAtLeastAndroid10) {
++            saveWithMediaStore(fileName, title, artist, album, track, progress)
++        } else {
++            saveLegacy(fileName, track, progress)
++        }
++    }
++}
++
++private fun Context.saveWithMediaStore(
++    fileName: String,
++    title: String,
++    artist: String?,
++    album: String?,
++    track: AudioStreamDownloader.AudioTrack,
++    onProgress: (Long, Long) -> Unit,
++): Uri {
++    val resolver = contentResolver
++    val collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
++
++    val values = ContentValues().apply {
++        put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
++        put(MediaStore.Audio.Media.MIME_TYPE, track.mimeType)
++        put(MediaStore.Audio.Media.RELATIVE_PATH, "${AndroidEnvironment.DIRECTORY_MUSIC}/$DOWNLOAD_FOLDER")
++        put(MediaStore.Audio.Media.TITLE, title)
++        artist?.let { put(MediaStore.Audio.Media.ARTIST, it) }
++        album?.let { put(MediaStore.Audio.Media.ALBUM, it) }
++        put(MediaStore.Audio.Media.IS_MUSIC, 1)
++        put(MediaStore.Audio.Media.IS_PENDING, 1) // hidden from other apps until finished
++    }
++
++    val uri = resolver.insert(collection, values)
++        ?: throw IllegalStateException("MediaStore insert failed")
++
++    try {
++        resolver.openOutputStream(uri)!!.use { out ->
++            AudioStreamDownloader.download(track, out, onProgress = onProgress)
++        }
++        resolver.update(
++            uri,
++            ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) },
++            null, null
++        )
++        return uri
++    } catch (e: Throwable) {
++        resolver.delete(uri, null, null) // don't leave half files behind
++        throw e
++    }
++}
++
++// Android 9 and lower: WRITE_EXTERNAL_STORAGE (already declared, maxSdk 32) must be granted.
++private fun Context.saveLegacy(
++    fileName: String,
++    track: AudioStreamDownloader.AudioTrack,
++    onProgress: (Long, Long) -> Unit,
++): Uri {
++    @Suppress("DEPRECATION")
++    val dir = File(
++        AndroidEnvironment.getExternalStoragePublicDirectory(AndroidEnvironment.DIRECTORY_MUSIC),
++        DOWNLOAD_FOLDER
++    ).apply { mkdirs() }
++    val file = File(dir, fileName)
++
++    try {
++        FileOutputStream(file).use { out ->
++            AudioStreamDownloader.download(track, out, onProgress = onProgress)
++        }
++    } catch (e: Throwable) {
++        file.delete()
++        throw e
++    }
++
++    MediaScannerConnection.scanFile(this, arrayOf(file.absolutePath), arrayOf(track.mimeType), null)
++    return Uri.fromFile(file)
++}
++
++private fun safeFileName(name: String): String =
++    name.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().take(120).ifBlank { "song" }
+diff --git a/androidApp/src/main/res/values-es/strings.xml b/androidApp/src/main/res/values-es/strings.xml
+index a3370d2..4a315e0 100644
+--- a/androidApp/src/main/res/values-es/strings.xml
++++ b/androidApp/src/main/res/values-es/strings.xml
+@@ -1513,4 +1513,8 @@
+     <string name="homepage_local_description">The home feed is built exclusively from your library: songs, albums, and playlists stored on your device. No section comes from YouTube Music.</string>
+     <string name="homepage_local_hint">Tip: pair with Offline mode for a fully disconnected experience</string>
+     <string name="show_upnext_in_miniplayer">Show up next in the mini player</string>
++    <string name="download_to_device">Descargar al dispositivo</string>
++    <string name="download_started">Descarga iniciada</string>
++    <string name="download_completed">Descarga completada, guardada en Música/RiPlay</string>
++    <string name="download_failed">No se pudo descargar</string>
+ </resources>
+diff --git a/androidApp/src/main/res/values/strings.xml b/androidApp/src/main/res/values/strings.xml
+index b4b34ae..aa0b1a6 100644
+--- a/androidApp/src/main/res/values/strings.xml
++++ b/androidApp/src/main/res/values/strings.xml
+@@ -1515,4 +1515,8 @@
+     <string name="homepage_local_description">The home feed is built exclusively from your library: songs, albums, and playlists stored on your device. No section comes from YouTube Music.</string>
+     <string name="homepage_local_hint">Tip: pair with Offline mode for a fully disconnected experience</string>
+     <string name="show_upnext_in_miniplayer">Show up next in the mini player</string>
++    <string name="download_to_device">Download to device</string>
++    <string name="download_started">Download started</string>
++    <string name="download_completed">Download completed, saved in Music/RiPlay</string>
++    <string name="download_failed">Download failed</string>
+ </resources>
+diff --git a/modules/environment/src/main/kotlin/it/fast4x/environment/utils/AudioStreamDownloader.kt b/modules/environment/src/main/kotlin/it/fast4x/environment/utils/AudioStreamDownloader.kt
+new file mode 100644
+index 0000000..03c7282
+--- /dev/null
++++ b/modules/environment/src/main/kotlin/it/fast4x/environment/utils/AudioStreamDownloader.kt
+@@ -0,0 +1,123 @@
++package it.fast4x.environment.utils
++
++import it.fast4x.environment.Environment
++import okhttp3.OkHttpClient
++import okhttp3.Request
++import org.schabi.newpipe.extractor.MediaFormat
++import org.schabi.newpipe.extractor.ServiceList
++import org.schabi.newpipe.extractor.stream.AudioStream
++import org.schabi.newpipe.extractor.stream.DeliveryMethod
++import org.schabi.newpipe.extractor.stream.StreamInfo
++import java.io.IOException
++import java.io.OutputStream
++import java.util.concurrent.TimeUnit
++
++/**
++ * Resolves the audio stream of a video with NewPipe Extractor and writes it to an OutputStream.
++ * Pure JVM: storing the file (MediaStore, tags, etc.) is done in the app module.
++ */
++object AudioStreamDownloader {
++
++    data class AudioTrack(
++        val url: String,
++        val mimeType: String,
++        val extension: String,
++        val bitrate: Int,
++    )
++
++    // YouTube throttles single large requests; downloading in Range chunks keeps full speed.
++    private const val CHUNK_SIZE = 1L * 1024 * 1024
++
++    private val client by lazy {
++        OkHttpClient.Builder()
++            .proxy(Environment.proxy)
++            .connectTimeout(20, TimeUnit.SECONDS)
++            .readTimeout(30, TimeUnit.SECONDS)
++            .build()
++    }
++
++    /**
++     * Picks the best progressive audio stream. Prefers M4A (AAC) because Android's MediaStore
++     * indexes it as music on every version; falls back to WebM/Opus.
++     */
++    fun resolveBestAudio(videoId: String): Result<AudioTrack> = runCatching {
++        NewPipeUtils.ensureInitialized()
++
++        val info = StreamInfo.getInfo(
++            ServiceList.YouTube,
++            "https://www.youtube.com/watch?v=$videoId"
++        )
++
++        val candidates: List<AudioStream> = info.audioStreams.filter {
++            it.isUrl && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP && it.format != null
++        }
++        if (candidates.isEmpty()) throw IOException("No downloadable audio stream for $videoId")
++
++        val best = candidates.filter { it.format == MediaFormat.M4A }
++            .maxByOrNull { it.averageBitrate }
++            ?: candidates.maxBy { it.averageBitrate }
++
++        val format = best.format!!
++        AudioTrack(
++            url = best.content,
++            mimeType = format.mimeType,
++            extension = format.suffix,
++            bitrate = best.averageBitrate,
++        )
++    }
++
++    /**
++     * Downloads [track] into [output] using Range requests.
++     * [onProgress] receives (downloadedBytes, totalBytes or -1 if unknown).
++     * Check [isCancelled] to abort; the caller closes [output].
++     */
++    fun download(
++        track: AudioTrack,
++        output: OutputStream,
++        isCancelled: () -> Boolean = { false },
++        onProgress: (Long, Long) -> Unit = { _, _ -> },
++    ) {
++        var downloaded = 0L
++        var total = -1L
++        val buffer = ByteArray(64 * 1024)
++
++        while (total < 0 || downloaded < total) {
++            if (isCancelled()) throw IOException("Download cancelled")
++
++            val end = downloaded + CHUNK_SIZE - 1
++            val request = Request.Builder()
++                .url(track.url)
++                .header("Range", "bytes=$downloaded-$end")
++                .build()
++
++            client.newCall(request).execute().use { response ->
++                if (response.code == 416) return // past the end: done
++                if (!response.isSuccessful) throw IOException("HTTP ${response.code}")
++
++                if (total < 0) {
++                    // "Content-Range: bytes 0-1048575/4567890"
++                    total = response.header("Content-Range")
++                        ?.substringAfterLast('/')
++                        ?.toLongOrNull()
++                        ?: response.body.contentLength().takeIf { response.code == 200 } ?: -1L
++                }
++
++                var readInChunk = 0L
++                response.body.byteStream().use { input ->
++                    while (true) {
++                        if (isCancelled()) throw IOException("Download cancelled")
++                        val read = input.read(buffer)
++                        if (read == -1) break
++                        output.write(buffer, 0, read)
++                        downloaded += read
++                        readInChunk += read
++                        onProgress(downloaded, total)
++                    }
++                }
++
++                // Server ignored Range and sent the whole file, or returned an empty chunk.
++                if (response.code == 200 || readInChunk == 0L) return
++            }
++        }
++    }
++}
+diff --git a/modules/environment/src/main/kotlin/it/fast4x/environment/utils/NewPipe.kt b/modules/environment/src/main/kotlin/it/fast4x/environment/utils/NewPipe.kt
+index e6fbfc1..85f9fa8 100644
+--- a/modules/environment/src/main/kotlin/it/fast4x/environment/utils/NewPipe.kt
++++ b/modules/environment/src/main/kotlin/it/fast4x/environment/utils/NewPipe.kt
+@@ -64,6 +64,9 @@ object NewPipeUtils {
+         NewPipe.init(NewPipeDownloaderImpl(Environment.proxy))
+     }
+ 
++    /** Accessing the object runs init {}, which configures NewPipe. */
++    fun ensureInitialized() = Unit
++
+     fun getSignatureTimestamp(videoId: String): Result<Int> = runCatching {
+         YoutubeJavaScriptPlayerManager.getSignatureTimestamp(videoId)
+     }

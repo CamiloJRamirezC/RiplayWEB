@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RiPlay</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5h2v14H6zM19 5.5v13L9.5 12z" fill="currentColor"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM5 5.5v13l9.5-6.5z" fill="currentColor"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="18.5" cy="12" r="1.8" fill="currentColor"/></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h10M17 14v6l4-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M4 7h3.5c2 0 3 1 4.5 3.5S14.5 17 16.5 17H20M4 17h3.5c1.2 0 2-.4 2.8-1.3M20 7h-3.5c-1.2 0-2 .4-2.8 1.3M17.5 4.5 20 7l-2.5 2.5M17.5 14.5 20 17l-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M5 11V9.5A2.5 2.5 0 0 1 7.5 7H19m0 0-2.5-2.5M19 7l-2.5 2.5M19 13v1.5a2.5 2.5 0 0 1-2.5 2.5H5m0 0 2.5 2.5M5 17l2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="m16 9.5 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15 15 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-disk" viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h3l2 2h6A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M5 7h10M5 12h10M5 17h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="18" cy="16.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M20.5 16.5V8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11m0-11-11 11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-import" viewBox="0 0 24 24"><path d="M12 3.5v10m0 0-4-4m4 4 4-4M4.5 14.5v3A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M8 8a5.6 5.6 0 0 0 0 8M16 8a5.6 5.6 0 0 1 0 8M5.2 5.2a9.6 9.6 0 0 0 0 13.6M18.8 5.2a9.6 9.6 0 0 1 0 13.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  </svg>
+
+  <div class="app">
+    <nav class="side" aria-label="Secciones">
+      <div class="brand">RiPlay</div>
+      <button class="nav-item" data-view="search"><svg><use href="#i-search"/></svg><span>Buscar</span></button>
+      <button class="nav-item" data-view="local"><svg><use href="#i-disk"/></svg><span>En el disco</span><b class="nav-badge" id="dl-badge" hidden></b></button>
+      <div class="side-head"><span>Listas</span></div>
+      <button class="nav-item nav-action" id="new-playlist"><svg><use href="#i-plus"/></svg><span>Nueva lista</span></button>
+      <button class="nav-item nav-action" id="import-spotify"><svg><use href="#i-import"/></svg><span>Importar de Spotify</span><b class="nav-badge" id="import-badge" hidden></b></button>
+      <div id="playlist-nav" class="playlist-nav"></div>
+    </nav>
+
+    <main class="main" id="main" tabindex="-1"></main>
+
+    <aside class="queue" id="queue" hidden aria-label="Cola de reproducción">
+      <header class="queue-head">
+        <h2>Cola</h2>
+        <button class="text-btn" id="queue-clear">Vaciar</button>
+        <button class="icon-btn" id="queue-close" aria-label="Cerrar cola"><svg><use href="#i-close"/></svg></button>
+      </header>
+      <label class="radio-toggle"><input type="checkbox" id="radio-auto"> Seguir con canciones parecidas al terminar</label>
+      <ol id="queue-list" class="queue-list"></ol>
+    </aside>
+  </div>
+
+  <footer class="player" aria-label="Reproductor">
+    <input type="range" id="seek" class="seek" min="0" max="1000" value="0" step="1" aria-label="Posición" disabled>
+    <div class="player-row">
+      <div class="now">
+        <img id="now-cover" class="cover" alt="" hidden>
+        <div class="now-text">
+          <div id="now-title" class="now-title">Nada sonando</div>
+          <div id="now-artist" class="now-artist">Elegí una canción para empezar</div>
+        </div>
+      </div>
+      <div class="controls">
+        <button class="icon-btn" id="btn-shuffle" title="Mezclar la cola" aria-label="Mezclar la cola"><svg><use href="#i-shuffle"/></svg></button>
+        <button class="icon-btn" id="btn-prev" title="Anterior" aria-label="Anterior"><svg><use href="#i-prev"/></svg></button>
+        <button class="play-btn" id="btn-play" title="Reproducir" aria-label="Reproducir"><svg><use href="#i-play"/></svg></button>
+        <button class="icon-btn" id="btn-next" title="Siguiente" aria-label="Siguiente"><svg><use href="#i-next"/></svg></button>
+        <button class="icon-btn" id="btn-repeat" title="Repetir: no" aria-label="Repetir"><svg><use href="#i-repeat"/></svg><b class="repeat-one" hidden>1</b></button>
+      </div>
+      <div class="extras">
+        <span class="time" id="time">0:00 / 0:00</span>
+        <button class="icon-btn" id="btn-mute" aria-label="Silenciar"><svg><use href="#i-volume"/></svg></button>
+        <input type="range" id="volume" class="volume" min="0" max="1" step="0.01" value="1" aria-label="Volumen">
+        <button class="icon-btn" id="btn-dl-current" title="Descargar esta canción" aria-label="Descargar esta canción" disabled><svg><use href="#i-download"/></svg></button>
+        <button class="icon-btn" id="btn-queue" title="Cola" aria-label="Mostrar cola"><svg><use href="#i-queue"/></svg></button>
+      </div>
+    </div>
+  </footer>
+
+  <dialog id="pl-dialog" class="dialog" aria-labelledby="pl-dialog-title">
+    <form method="dialog" id="pl-form" novalidate>
+      <header class="dialog-head">
+        <h2 id="pl-dialog-title">Nueva lista</h2>
+        <button type="button" class="icon-btn" id="pl-dialog-close" aria-label="Cerrar"><svg><use href="#i-close"/></svg></button>
+      </header>
+
+      <div class="segmented dialog-tabs" role="tablist">
+        <button type="button" role="tab" data-mode="empty" aria-selected="true">Lista vacía</button>
+        <button type="button" role="tab" data-mode="spotify" aria-selected="false">Desde Spotify</button>
+      </div>
+
+      <section data-panel="empty">
+        <label class="field">
+          <span>Nombre</span>
+          <input type="text" id="pl-name" maxlength="100" placeholder="Por ejemplo: Para el auto" autocomplete="off">
+        </label>
+        <p class="hint" id="pl-pending" hidden></p>
+        <div class="dialog-actions">
+          <button type="submit" class="btn primary" id="pl-create">Crear lista</button>
+        </div>
+      </section>
+
+      <section data-panel="spotify" hidden>
+        <label class="field">
+          <span>Enlace de la playlist o álbum</span>
+          <textarea id="sp-text" rows="3" placeholder="https://open.spotify.com/playlist/…" spellcheck="false"></textarea>
+        </label>
+        <p class="hint">En Spotify: menú ⋯ de la lista → Compartir → Copiar enlace. La lista tiene que ser pública.</p>
+        <details class="more">
+          <summary>Otras formas de importar</summary>
+          <p class="hint">En el mismo cuadro también podés pegar:</p>
+          <ul class="hint">
+            <li>Enlaces de canciones, uno por línea. En la app de Spotify, entrá a la lista, apretá Ctrl+A y después Ctrl+C. Sirve para listas privadas.</li>
+            <li>Canciones escritas como <b>Artista - Canción</b>, una por línea.</li>
+          </ul>
+          <label class="field file-field">
+            <span>O subí un archivo CSV (por ejemplo, el que genera exportify.app)</span>
+            <input type="file" id="sp-csv" accept=".csv,text/csv,text/plain">
+          </label>
+        </details>
+        <label class="field">
+          <span>Nombre de la lista <small>(opcional: si lo dejás vacío usa el de Spotify)</small></span>
+          <input type="text" id="sp-name" maxlength="100" autocomplete="off">
+        </label>
+        <div class="dialog-actions">
+          <button type="submit" class="btn primary" id="sp-start">Importar</button>
+        </div>
+      </section>
+
+      <section data-panel="progress" hidden aria-live="polite">
+        <p class="progress-title" id="imp-title">Leyendo la lista de Spotify…</p>
+        <div class="progress"><div class="progress-bar" id="imp-bar"></div></div>
+        <p class="hint" id="imp-detail"></p>
+        <p class="warn" id="imp-warning" hidden></p>
+        <div id="imp-missing" hidden>
+          <p class="progress-sub" id="imp-missing-title"></p>
+          <ul class="missing-list" id="imp-missing-list"></ul>
+        </div>
+        <p class="error-box" id="imp-error" hidden></p>
+        <div class="dialog-actions">
+          <button type="button" class="btn" id="imp-again" hidden>Importar otra</button>
+          <button type="button" class="btn" id="imp-background">Seguir en segundo plano</button>
+          <button type="button" class="btn primary" id="imp-open" hidden>Abrir lista</button>
+        </div>
+      </section>
+    </form>
+  </dialog>
+
+  <div id="menu" class="menu" role="menu" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <audio id="audio" preload="auto"></audio>
+  <script src="/app.js"></script>
+</body>
+</html>

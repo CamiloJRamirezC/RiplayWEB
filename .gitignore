@@ -1,0 +1,11 @@
+# Entorno de Python
+.venv/
+__pycache__/
+*.pyc
+
+# Datos personales (cuando la app y los datos están en la misma carpeta)
+config.json
+playlists.json
+downloads.json
+riplay.log*
+*.tmp
