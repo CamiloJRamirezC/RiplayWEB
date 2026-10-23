@@ -7,5 +7,6 @@ __pycache__/
 config.json
 playlists.json
 downloads.json
+eq.json
 riplay.log*
 *.tmp

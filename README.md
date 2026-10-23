@@ -43,6 +43,14 @@ negra; cerrala para apagarlo.
   - También acepta texto `Artista - Canción` (una por línea) o un archivo CSV de exportify.app.
   - Spotify no ofrece esto oficialmente: si un día cambia su página y deja de leer listas
     largas, RiPlay avisa y conviene usar el CSV de Exportify.
+- **Ecualizador:** botón de las barras deslizantes en el reproductor. Tiene 10 bandas (32 Hz a
+  16 kHz), un preamplificador y presets: Rock, Pop, Jazz, Clásica, Techno, Electrónica, Dance,
+  Hip-hop, Reggaetón, Latina, Metal, Acústica, Voz, Más graves, Más agudos y Noche.
+  - Mové cualquier banda para ajustarlo a tu gusto (doble clic la vuelve a 0) y tocá
+    **Guardar preset** para tenerlo como uno propio.
+  - Se recuerda entre sesiones. Si suena saturado, bajá un poco el **Pre**.
+  - Funciona con lo que suena online y con lo descargado. Las canciones descargadas se guardan
+    sin ecualizar: el ecualizador se aplica al escuchar.
 - **Cola:** botón de la derecha en el reproductor. Si dejás marcada la opción
   "Seguir con canciones parecidas", al terminar la cola sigue sola.
 - **En el disco:** lo que descargaste, la carpeta donde se guarda y el progreso de las descargas.
@@ -54,7 +62,8 @@ negra; cerrala para apagarlo.
 - **Canciones descargadas:** `Música/RiPlay` en tu carpeta de usuario (se cambia desde
   "En el disco" → "Cambiar carpeta"). Se guardan en `.m4a` con título, artista, álbum y portada,
   así que cualquier otro reproductor las reconoce.
-- **Listas y configuración:** carpeta `RiPlayWeb` en tu usuario (`playlists.json`, `config.json`).
+- **Listas y configuración:** carpeta `RiPlayWeb` en tu usuario (`playlists.json`, `config.json`,
+  `eq.json`).
   Copiá esa carpeta para tener un respaldo.
 
 ## Si algo falla

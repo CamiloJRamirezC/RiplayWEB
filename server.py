@@ -563,6 +563,67 @@ def open_folder(path: Path) -> None:
         subprocess.Popen(["xdg-open", str(path)])
 
 
+# ---------------------------------------------------------------- ecualizador
+
+EQ_BANDS = 10
+EQ_LIMIT = 12.0
+
+
+def _clamp(value, low, high, default=0.0) -> float:
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return default
+    if value != value:  # NaN
+        return default
+    return round(max(low, min(high, value)), 1)
+
+
+def _clean_gains(gains) -> list[float]:
+    gains = list(gains or [])[:EQ_BANDS]
+    gains += [0.0] * (EQ_BANDS - len(gains))
+    return [_clamp(g, -EQ_LIMIT, EQ_LIMIT) for g in gains]
+
+
+def _sanitize_eq(eq: dict) -> dict:
+    """Solo valores válidos: lo que llega del navegador nunca se guarda tal cual."""
+    eq = eq if isinstance(eq, dict) else {}
+    custom, seen = [], set()
+    for c in eq.get("custom") or []:
+        if not isinstance(c, dict):
+            continue
+        name = str(c.get("name") or "").strip()[:40]
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        custom.append({"name": name, "gains": _clean_gains(c.get("gains")),
+                       "preamp": _clamp(c.get("preamp"), -EQ_LIMIT, EQ_LIMIT)})
+        if len(custom) >= 30:
+            break
+    return {
+        "enabled": bool(eq.get("enabled", False)),
+        "preset": str(eq.get("preset") or "flat")[:60],
+        "gains": _clean_gains(eq.get("gains")),
+        "preamp": _clamp(eq.get("preamp"), -EQ_LIMIT, EQ_LIMIT),
+        "custom": custom,
+    }
+
+
+def load_eq() -> dict:
+    return _sanitize_eq(_read_json("eq.json", {}))
+
+
+def save_eq(body: dict) -> dict:
+    if not isinstance(body, dict):
+        raise ValueError("Configuración de ecualizador inválida")
+    with _file_lock:
+        current = load_eq()
+        merged = {**current, **{k: body[k] for k in ("enabled", "preset", "gains", "preamp", "custom") if k in body}}
+        clean = _sanitize_eq(merged)
+        _write_json("eq.json", clean)
+    return clean
+
+
 # ---------------------------------------------------------------- listas
 
 
@@ -861,6 +922,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(list_local())
         if len(parts) == 2 and parts[0] == "local" and method == "GET":
             return self._serve_file(local_path(parts[1]))
+
+        if parts == ["eq"]:
+            if method == "GET":
+                return self._json(load_eq())
+            if method == "POST":
+                return self._json(save_eq(self._body()))
 
         if parts == ["status"] and method == "GET":
             return self._json({**library_status(), "log": str(LOG_FILE)})
