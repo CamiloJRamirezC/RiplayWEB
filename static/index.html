@@ -5,6 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RiPlay</title>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="theme-color" content="#EDF0EB" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121915" media="(prefers-color-scheme: dark)">
+  <meta name="application-name" content="RiPlay">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&display=swap" rel="stylesheet">
@@ -43,6 +48,7 @@
       <button class="nav-item nav-action" id="new-playlist"><svg><use href="#i-plus"/></svg><span>Nueva lista</span></button>
       <button class="nav-item nav-action" id="import-spotify"><svg><use href="#i-import"/></svg><span>Importar de Spotify</span><b class="nav-badge" id="import-badge" hidden></b></button>
       <div id="playlist-nav" class="playlist-nav"></div>
+      <button class="nav-item nav-install" id="install-app" hidden><svg><use href="#i-download"/></svg><span>Instalar RiPlay</span></button>
     </nav>
 
     <main class="main" id="main" tabindex="-1"></main>

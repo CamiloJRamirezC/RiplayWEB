@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from html import escape as html_escape
 import mimetypes
 import os
 import re
@@ -29,6 +30,7 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(APP_DIR))
 import spotify_import as spi  # noqa: E402
+import desktop  # noqa: E402
 STATIC_DIR = APP_DIR / "static"
 DATA_DIR = Path(os.environ.get("RIPLAY_DATA", Path.home() / "RiPlayWeb"))
 HOST = "127.0.0.1"
@@ -360,6 +362,8 @@ def _open_upstream(entry: dict, start: int, end: int):
 
 # ---------------------------------------------------------------- descargas
 
+
+_activity = {"playback": 0.0}  # última vez que se pidió audio (online o local)
 
 _downloads: dict[str, dict] = {}
 _downloads_lock = threading.Lock()
@@ -870,6 +874,8 @@ class Handler(BaseHTTPRequestHandler):
         if STATIC_DIR.resolve() not in target.parents or not target.is_file():
             return self._error("No encontrado", 404)
         data = target.read_bytes()
+        if target.name == "offline.html":  # la página de "apagado" muestra dónde está iniciar.bat
+            data = data.replace(b"{{APP_DIR}}", html_escape(str(APP_DIR)).encode("utf-8"))
         known = {
             ".html": "text/html; charset=utf-8",
             ".js": "text/javascript; charset=utf-8",
@@ -877,6 +883,7 @@ class Handler(BaseHTTPRequestHandler):
             ".svg": "image/svg+xml",
             ".png": "image/png",
             ".ico": "image/x-icon",
+            ".webmanifest": "application/manifest+json; charset=utf-8",
         }
         ctype = known.get(target.suffix.lower()) or mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         self.send_response(200)
@@ -1019,6 +1026,7 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- audio
     def _stream(self, video_id: str) -> None:
+        _activity["playback"] = time.time()
         if not re.fullmatch(r"[\w-]{6,20}", video_id):
             return self._error("Identificador inválido")
         rng = _parse_range(self.headers.get("Range"))
@@ -1080,6 +1088,7 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(chunk)
 
     def _serve_file(self, path: Path) -> None:
+        _activity["playback"] = time.time()
         size = path.stat().st_size
         ctype = {".m4a": "audio/mp4", ".webm": "audio/webm", ".opus": "audio/ogg"}.get(
             path.suffix.lower()
@@ -1138,33 +1147,98 @@ def open_browser(url: str) -> None:
         print(f"No pude abrir el navegador ({exc}). Abrí a mano: {url}")
 
 
+def open_ui(url: str) -> None:
+    """Abre RiPlay como app instalada si existe; si no, en el navegador predeterminado."""
+    desktop.open_app(url, open_browser)
+
+
 def _open_when_ready(url: str) -> None:
-    """Espera a que el servicio responda de verdad y recién ahí abre el navegador."""
+    """Espera a que el servicio responda de verdad y recién ahí abre la app."""
     for _ in range(100):  # hasta ~20 segundos
         if _is_riplay(url):
-            print("Servicio listo. Abriendo el navegador...")
-            open_browser(url)
+            print("Servicio listo. Abriendo RiPlay...")
+            open_ui(url)
             return
         time.sleep(0.2)
     print(f"El servicio tarda en responder. Abrí a mano: {url}")
 
 
+def is_idle(minutes: float = 10) -> bool:
+    """Nadie está escuchando, descargando ni importando."""
+    if time.time() - _activity["playback"] < minutes * 60:
+        return False
+    with _downloads_lock:
+        if any(d.get("status") in ("queued", "downloading") for d in _downloads.values()):
+            return False
+    with _imports_lock:
+        if any(j.get("stage") in ("queued", "reading", "matching") for j in _imports.values()):
+            return False
+    return True
+
+
+def _run_background(server: ThreadingHTTPServer, url: str, silent: bool) -> None:
+    """Servicio sin ventana: ícono junto al reloj, inicio con Windows y actualizaciones."""
+    cfg = get_config()
+    first_time = not cfg.get("backgroundIntro")
+    if first_time:
+        cfg["backgroundIntro"] = True
+        with _file_lock:
+            _write_json("config.json", cfg)
+    if desktop.autostart_supported() and (first_time or desktop.autostart_enabled()):
+        # La primera vez se activa; después se rehace para que apunte siempre al Python actual
+        threading.Thread(target=desktop.set_autostart, args=(True, APP_DIR), daemon=True).start()
+
+    threading.Thread(target=server.serve_forever, daemon=True, name="riplay-http").start()
+    if not silent:
+        threading.Thread(target=_open_when_ready, args=(url,), daemon=True).start()
+
+    tray = desktop.Tray(
+        image_path=STATIC_DIR / "icons" / "tray-64.png",
+        title=f"RiPlay ({url})",
+        on_open=lambda: open_ui(url),
+        on_folder=lambda: open_folder(download_dir()),
+        autostart_get=desktop.autostart_enabled,
+        autostart_set=lambda on: desktop.set_autostart(on, APP_DIR),
+        notify_text=("RiPlay sigue funcionando acá, junto al reloj. Clic derecho para ver las opciones."
+                     if first_time else None),
+    )
+    updater = desktop.Updater(APP_DIR / "requirements.txt", is_idle=is_idle,
+                              request_restart=lambda: tray.stop("restart"))
+    updater.start()
+    log.info("Servicio en segundo plano iniciado en %s", url)
+
+    action = tray.run()  # bloquea hasta Salir o Reiniciar
+    updater.stop_event.set()
+    log.info("Servicio detenido (%s)", "reinicio" if action == "restart" else "salir")
+    server.shutdown()
+    server.server_close()
+    if action == "restart":
+        desktop.spawn_again(APP_DIR, ["--background", "--silent"])
+    logging.shutdown()
+    os._exit(0)  # no esperar descargas o importaciones a medias
+
+
 def main() -> None:
+    args = sys.argv[1:]
+    background = "--background" in args
+    silent = "--silent" in args or "--no-browser" in args
     url = f"http://{HOST}:{PORT}"
     try:
         server = ThreadingHTTPServer((HOST, PORT), Handler)
     except OSError:
         if _is_riplay(url):
-            print("RiPlay ya estaba abierto. Abro el navegador.")
-            if "--no-browser" not in sys.argv:
-                open_browser(url)
+            print("RiPlay ya estaba abierto. Lo muestro.")
+            if not silent:
+                open_ui(url)
             sys.exit(EXIT_ALREADY_RUNNING)
         print(f"El puerto {PORT} está ocupado por otro programa.")
         print("Cerralo, o usá otro puerto: set RIPLAY_PORT=8800 y abrí de nuevo iniciar.bat")
+        log.error("El puerto %s está ocupado por otro programa", PORT)
         sys.exit(EXIT_PORT_BUSY)
     server.daemon_threads = True
     status = library_status()
-    log.info("Inicio. Python %s, yt-dlp %s, ytmusicapi %s, mutagen %s",
+    log.info("Inicio (%s). Python %s, yt-dlp %s, ytmusicapi %s, mutagen %s",
+             "segundo plano" if background else "consola",
              status["python"], status["yt-dlp"], status["ytmusicapi"], status["mutagen"])
     missing = [k for k in ("yt-dlp", "ytmusicapi") if not status[k]]
     if missing:
@@ -1173,10 +1247,16 @@ def main() -> None:
         for k in missing:
             print(f"  {k}: {status.get(k + 'Error')}")
         print("")
+
+    if background:
+        if desktop.tray_available():
+            return _run_background(server, url, silent)
+        log.warning("Sin ícono de bandeja: sigo en modo consola")
+
     print(f"RiPlay Web está corriendo en {url}")
     print(f"Descargas: {download_dir()}")
     print("Cerrá esta ventana (o Ctrl+C) para detenerlo.")
-    if "--no-browser" not in sys.argv:
+    if not silent:
         threading.Thread(target=_open_when_ready, args=(url,), daemon=True).start()
     try:
         server.serve_forever()

@@ -934,6 +934,42 @@ if ("mediaSession" in navigator) {
 
 /* ============================================================ inicio */
 
+/* ============================================================ instalar como app (PWA) */
+
+let installPrompt = null;
+const installBtn = $("#install-app");
+const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault(); // el botón propio reemplaza al aviso del navegador
+  installPrompt = e;
+  installBtn.hidden = isStandalone();
+});
+installBtn.addEventListener("click", async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  const { outcome } = await installPrompt.userChoice;
+  if (outcome === "accepted") installBtn.hidden = true;
+  installPrompt = null;
+});
+window.addEventListener("appinstalled", () => {
+  installBtn.hidden = true;
+  installPrompt = null;
+  toast("RiPlay quedó instalado. Lo encontrás en el menú Inicio.");
+});
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((err) => console.warn("Service worker:", err));
+  });
+}
+// Accesos directos del ícono instalado (clic derecho en la barra de tareas)
+{
+  const vista = new URLSearchParams(location.search).get("vista");
+  if (vista === "buscar") state.view = "search";
+  if (vista === "disco") state.view = "local";
+  if (vista) history.replaceState(null, "", "/");
+}
+
 (async function init() {
   updateRepeat();
   syncPlayButton();

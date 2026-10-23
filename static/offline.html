@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RiPlay está apagado</title>
+<style>
+  :root { --bg:#EDF0EB; --surface:#F8FAF6; --ink:#1D2B24; --ink-2:#4A6152; --line:#CCD4CB; --accent:#C92F72; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#121915; --surface:#18211C; --ink:#E3EAE4; --ink-2:#9CB0A2; --line:#2A3730; --accent:#EE5E9B; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--ink);
+         font: 17px/1.5 "Segoe UI", system-ui, sans-serif; padding: 24px 16px; }
+  main { max-width: 34em; }
+  svg { width: 56px; height: 56px; display: block; margin-bottom: 22px; }
+  h1 { font-size: clamp(30px, 6vw, 42px); line-height: 1.05; letter-spacing: -.03em; margin: 0 0 12px; font-weight: 800; }
+  p { margin: 0 0 14px; color: var(--ink-2); }
+  ol { margin: 0 0 22px; padding-left: 22px; color: var(--ink); }
+  li { margin-bottom: 8px; }
+  code { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 2px 7px; font: 15px "Segoe UI", system-ui, sans-serif; overflow-wrap: anywhere; }
+  .status { display: flex; align-items: center; gap: 10px; color: var(--ink-2); font-size: 15px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: pulse 1.4s ease-in-out infinite; flex: none; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  button { margin-top: 18px; border: 0; border-radius: 11px; padding: 10px 18px; background: var(--ink); color: var(--bg); font: inherit; cursor: pointer; }
+  button:focus-visible { outline: 2.5px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+</style>
+</head>
+<body>
+<main>
+  <svg viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="16" fill="#1D2B24"/><path d="M24 18v28l22-14z" fill="#E0498A"/></svg>
+  <h1>RiPlay está apagado</h1>
+  <p>El servicio que busca y reproduce la música no está corriendo en esta compu.</p>
+  <ol>
+    <li>Abrí <code>iniciar.bat</code> en la carpeta de RiPlay: <code id="app-dir">{{APP_DIR}}</code></li>
+    <li>Esta ventana se conecta sola cuando el servicio arranca.</li>
+  </ol>
+  <p>Para que no vuelva a pasar, dejá marcada la opción “Iniciar con Windows” en el ícono de RiPlay junto al reloj.</p>
+  <div class="status" role="status"><span class="dot" aria-hidden="true"></span><span id="msg">Esperando al servicio…</span></div>
+  <button type="button" id="retry">Reintentar ahora</button>
+</main>
+<script>
+  const dir = document.getElementById("app-dir");
+  if (dir.textContent.includes("{{")) dir.textContent = "donde descomprimiste RiPlay";
+  async function check() {
+    try {
+      const r = await fetch("/api/status", { cache: "no-store" });
+      if (r.ok) { document.getElementById("msg").textContent = "Servicio encontrado. Abriendo…"; location.reload(); return; }
+    } catch (e) { /* sigue apagado */ }
+    setTimeout(check, 2000);
+  }
+  document.getElementById("retry").addEventListener("click", () => location.reload());
+  check();
+</script>
+</body>
+</html>

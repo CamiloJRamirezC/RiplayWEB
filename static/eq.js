@@ -124,22 +124,29 @@ function eqPresetById(id) {
   return EQ_PRESETS.find((p) => p.id === id) || null;
 }
 
-function eqSave() {
+function eqPost() {
   clearTimeout(eq.saveTimer);
-  eq.pending = true;
-  eq.saveTimer = setTimeout(() => {
-    eq.pending = false;
-    api("eq", { method: "POST", body: eq.state }).catch((err) => toast("No se guardó el ecualizador: " + err.message));
-  }, 400);
+  eq.pending = false;
+  api("eq", { method: "POST", body: eq.state }).catch((err) => toast("No se guardó el ecualizador: " + err.message));
 }
 
-// Si la página se cierra o se recarga con un cambio sin guardar, se manda en ese momento
+// Botones (presets, encender): se guarda en el acto. Deslizadores: se espera a que termine de moverse.
+function eqSave({ debounce = false } = {}) {
+  clearTimeout(eq.saveTimer);
+  if (!debounce) return eqPost();
+  eq.pending = true;
+  eq.saveTimer = setTimeout(eqPost, 400);
+}
+
+// Si la página se cierra con un cambio sin guardar, se manda con sendBeacon:
+// un fetch común se pierde al cerrar cuando la página tiene service worker.
 function eqFlush() {
   if (!eq.pending) return;
   clearTimeout(eq.saveTimer);
   eq.pending = false;
   try {
-    fetch("/api/eq", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(eq.state) });
+    const blob = new Blob([JSON.stringify(eq.state)], { type: "application/json" });
+    if (!navigator.sendBeacon || !navigator.sendBeacon("/api/eq", blob)) eqPost();
   } catch { /* nada más que hacer */ }
 }
 window.addEventListener("pagehide", eqFlush);
@@ -171,7 +178,7 @@ function eqSetBand(i, value) {
   if (!eq.state.enabled) return eqSetEnabled(true);
   eqApplyToGraph();
   eqRender({ keepSliders: true });
-  eqSave();
+  eqSave({ debounce: true });
 }
 
 function eqSetPreamp(value) {
@@ -179,7 +186,7 @@ function eqSetPreamp(value) {
   if (!eq.state.enabled) return eqSetEnabled(true);
   eqApplyToGraph();
   eqRender({ keepSliders: true });
-  eqSave();
+  eqSave({ debounce: true });
 }
 
 function eqSaveAsPreset() {

@@ -16,15 +16,36 @@ No hace falta ffmpeg ni ninguna cuenta. Lo descargado se escucha sin internet.
 
 Lo que hace `iniciar.bat`:
 
-1. Busca Python 3.10 o más nuevo. Si ya está, sigue de largo.
-2. Si no está, lo instala con winget o, si no hay winget, con el instalador oficial de python.org.
-3. Prepara RiPlay la primera vez (tarda un minuto) y actualiza **yt-dlp** en cada arranque:
-   YouTube cambia seguido y esa actualización es lo que mantiene funcionando la reproducción y las
-   descargas.
-4. Inicia el servicio y, cuando ya responde, abre RiPlay en tu navegador predeterminado.
+1. Si RiPlay ya está funcionando, solo lo abre.
+2. Busca Python 3.10 o más nuevo. Si no está, lo instala con winget o, si no hay winget, con
+   el instalador oficial de python.org.
+3. Prepara RiPlay la primera vez (tarda un minuto) y actualiza **yt-dlp**: YouTube cambia seguido
+   y esa actualización es lo que mantiene funcionando la reproducción y las descargas.
+4. Inicia el servicio **en segundo plano, sin ventana**, y cuando ya responde abre RiPlay.
 
-Si RiPlay ya estaba abierto, solo abre el navegador. Mientras lo uses dejá abierta la ventana
-negra; cerrala para apagarlo.
+### El ícono junto al reloj
+
+Mientras RiPlay funciona aparece su ícono junto al reloj de Windows (puede estar en la flechita
+de íconos ocultos). Doble clic lo abre; clic derecho muestra:
+
+- **Abrir RiPlay** y **Abrir carpeta de descargas**.
+- **Iniciar con Windows**: viene activado, así RiPlay ya está listo cuando prendés la compu.
+  Destildalo si no lo querés.
+- **Reiniciar** y **Salir** (apaga el servicio).
+
+El servicio busca actualizaciones de yt-dlp una vez por día y, si hay, se reinicia solo cuando
+no estás escuchando ni descargando nada.
+
+Para verlo en una ventana con todos los mensajes (útil si algo falla): `iniciar.bat consola`.
+
+### Instalarlo como app
+
+En Chrome o Edge aparece **Instalar RiPlay** al pie de la barra lateral (o el ícono de instalar en
+la barra de direcciones). Queda en el menú Inicio y la barra de tareas, y se abre en su propia
+ventana. Desde ahí, el ícono junto al reloj abre directamente esa ventana.
+
+La app necesita el servicio funcionando. Si alguna vez está apagado, la ventana lo avisa y se
+conecta sola cuando el servicio vuelve. Firefox no permite instalar páginas como app.
 
 ## Cómo se usa
 
@@ -72,9 +93,10 @@ negra; cerrala para apagarlo.
 - Si la página muestra **"La búsqueda no puede funcionar todavía"**, seguí lo que indica: casi
   siempre es un Python viejo (hace falta 3.10 o más nuevo) o librerías que no se instalaron.
 
-- **"YouTube pidió verificación anti-bot"** o una canción no carga: cerrá y volvé a abrir con
-  `iniciar.bat` para que se actualice yt-dlp. Si sigue, esperá un rato.
-- **"El puerto 8765 está ocupado"**: RiPlay ya está abierto en otra ventana.
+- **"YouTube pidió verificación anti-bot"** o una canción no carga: clic derecho en el ícono
+  junto al reloj → **Reiniciar**. Al arrancar busca una versión nueva de yt-dlp y, si la hay, la
+  aplica sola en un minuto (si no estás escuchando nada). Si sigue, esperá un rato.
+- **"El puerto 8765 está ocupado por otro programa"**: otro programa usa ese puerto.
 - Para usar otro puerto: variable de entorno `RIPLAY_PORT` (por ejemplo 8800).
 
 El servidor solo escucha en tu propia compu (127.0.0.1): nadie de tu red puede entrar.

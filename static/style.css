@@ -89,6 +89,9 @@ svg { width: 22px; height: 22px; flex: none; }
 .playlist-nav { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
 .playlist-nav:empty { display: none; }
 .nav-action { color: var(--ink); }
+.nav-install { margin-top: auto; border: 1.5px solid var(--line); color: var(--ink); font-weight: 700; }
+.nav-install svg { color: var(--accent); }
+.nav-install:hover { border-color: var(--ink-2); }
 .nav-action svg { color: var(--accent); }
 
 /* ------------------------------------------------ diálogo */
@@ -349,6 +352,7 @@ ul.hint { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; m
   .playlist-nav { flex-direction: row; }
   .pl-link small { display: none; }
   .playlist-nav { border-top: 0; margin: 0; padding: 0; }
+  .nav-install { margin-top: 0; }
   .side-head { display: none; }
   .main { padding: 22px 16px 30px; }
   .track { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 12px; padding: 8px 4px; }

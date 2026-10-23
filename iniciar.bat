@@ -9,7 +9,10 @@ rem  RiPlay Web - inicio
 rem  1. Busca Python 3.10 o mas nuevo. Si no hay, lo instala
 rem     (solo para tu usuario, sin permisos de administrador).
 rem  2. Prepara el entorno y actualiza las librerias.
-rem  3. Inicia el servicio y, cuando responde, abre el navegador.
+rem  3. Inicia el servicio oculto (icono junto al reloj) y, cuando
+rem     responde, abre RiPlay (la app instalada o el navegador).
+rem
+rem  "iniciar.bat consola" lo corre en esta ventana, para ver errores.
 rem ============================================================
 
 set "PY_VERSION=3.13.16"
@@ -22,6 +25,23 @@ if not exist "server.py" (
   goto :fail
 )
 
+set "RP_PORT=%RIPLAY_PORT%"
+if not defined RP_PORT set "RP_PORT=8765"
+set "RP_DATA=%RIPLAY_DATA%"
+if not defined RP_DATA set "RP_DATA=%USERPROFILE%\RiPlayWeb"
+
+rem ---------------------------------------------------- 0. Ya esta funcionando?
+rem Si el servicio ya corre (por ejemplo, porque arranca con Windows) no se toca nada:
+rem actualizar librerias en uso puede fallar en Windows. Solo se abre RiPlay.
+if /i "%~1"=="consola" goto :check_python
+if not exist ".venv\Scripts\pythonw.exe" goto :check_python
+call :is_running 2
+if errorlevel 1 goto :check_python
+echo RiPlay ya esta funcionando. Lo abro.
+start "" ".venv\Scripts\pythonw.exe" server.py --background
+exit /b 0
+
+:check_python
 rem ---------------------------------------------------- 1. Python
 call :find_python
 if defined PY goto :python_ok
@@ -88,6 +108,8 @@ if errorlevel 1 (
 echo Revisando actualizaciones de yt-dlp...
 ".venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -U -r requirements.txt
 if errorlevel 1 echo No se pudo actualizar. Sigo con lo que ya esta instalado.
+rem Icono junto al reloj (si no se puede instalar, RiPlay corre en esta ventana)
+".venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -r requirements-windows.txt >nul 2>nul
 
 ".venv\Scripts\python.exe" -c "import yt_dlp, ytmusicapi" >nul 2>nul
 if not errorlevel 1 goto :start_server
@@ -99,13 +121,35 @@ echo.
 echo Revisa tu conexion a internet (o si un antivirus o proxy bloquea pip) y abri de nuevo este archivo.
 goto :fail
 
-rem ---------------------------------------------------- 3. Servicio + navegador
+rem ---------------------------------------------------- 3. Servicio + app
 :start_server
 echo.
-rem server.py abre el navegador predeterminado recien cuando el servicio responde.
-rem Si RiPlay ya estaba abierto, solo abre el navegador y termina.
+if /i "%~1"=="consola" goto :console_mode
+if not exist ".venv\Scripts\pythonw.exe" goto :console_mode
+".venv\Scripts\python.exe" -c "import pystray, PIL" >nul 2>nul
+if errorlevel 1 goto :console_mode
+
+echo Iniciando RiPlay en segundo plano...
+start "" ".venv\Scripts\pythonw.exe" server.py --background
+call :is_running 60
+if errorlevel 1 goto :bg_failed
+echo Listo. RiPlay queda funcionando junto al reloj: clic derecho en su icono para ver las opciones.
+timeout /t 4 >nul
+exit /b 0
+
+:bg_failed
+echo.
+echo RiPlay no respondio. Ultimas lineas del registro (%RP_DATA%\riplay.log):
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path -LiteralPath '%RP_DATA%\riplay.log') { Get-Content -LiteralPath '%RP_DATA%\riplay.log' -Tail 15 -Encoding UTF8 }"
+echo.
+echo Para ver el error completo, abri:  iniciar.bat consola
+goto :fail
+
+:console_mode
+rem En esta ventana, como antes: cerrala para apagar RiPlay.
 ".venv\Scripts\python.exe" server.py
-rem 0 = cerrado normal, 3 = ya estaba abierto (solo abrio el navegador), otro = error
+rem 0 = cerrado normal, 3 = ya estaba abierto (solo lo mostro), otro = error
 if errorlevel 3 if not errorlevel 4 (
   timeout /t 4 >nul
   exit /b 0
@@ -158,3 +202,10 @@ echo %~1 | find /i "\WindowsApps\" >nul && exit /b 0
 if errorlevel 1 exit /b 0
 set "PY=%~1"
 exit /b 0
+
+rem ============================================================
+rem  :is_running N  ->  errorlevel 0 si RiPlay responde (espera hasta N/2 segundos)
+rem ============================================================
+:is_running
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$c = New-Object Net.WebClient; $c.Proxy = $null; for ($i = 0; $i -lt %~1; $i++) { try { $r = $c.DownloadString('http://127.0.0.1:%RP_PORT%/api/status'); if ($r -match 'yt-dlp') { exit 0 } } catch { }; Start-Sleep -Milliseconds 500 }; exit 1" >nul 2>nul
+exit /b %errorlevel%
