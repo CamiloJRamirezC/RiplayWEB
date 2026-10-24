@@ -267,12 +267,100 @@ def _flat_list(url: str, limit: int = 30) -> list[dict]:
 
 
 def _search_youtube(query: str, kind: str) -> list[dict]:
-    """Respaldo: búsqueda normal de YouTube con yt-dlp (funciona aunque falle YouTube Music)."""
-    text = query if kind == "videos" else f"{query} audio"
-    return _flat_list(f"ytsearch25:{text}", 25)
+    """Respaldo de YouTube Music: videos de YouTube para lo mismo que se escribió, sin agregarle nada."""
+    return _flat_list(f"ytsearch25:{query}", 25)
 
 
-def search(query: str, kind: str) -> list[dict]:
+# ---------------------------------------------------------------- búsqueda en YouTube, sin filtros
+
+YT_PAGE = 30
+COLLECTION_PAGE = 100
+
+
+def _https(url):
+    return "https:" + url if isinstance(url, str) and url.startswith("//") else url
+
+
+def _best_thumb(entry: dict):
+    thumbs = [t for t in entry.get("thumbnails") or [] if isinstance(t, dict) and t.get("url")]
+    if not thumbs:
+        return None
+    best = max(thumbs, key=lambda t: (t.get("width") or 0) * (t.get("height") or 0))
+    return _https(best["url"])
+
+
+def classify_entry(entry: dict) -> dict | None:
+    """Convierte un resultado de YouTube en video, lista o canal (lo demás se ignora)."""
+    if not isinstance(entry, dict):
+        return None
+    url = str(entry.get("url") or "")
+    eid = str(entry.get("id") or "")
+    if "/channel/" in url or re.fullmatch(r"UC[\w-]{22}", eid):
+        cid = eid if re.fullmatch(r"UC[\w-]{22}", eid) else url.rstrip("/").rsplit("/", 1)[-1]
+        if not re.fullmatch(r"UC[\w-]{22}", cid):
+            return None
+        return {"kind": "channel", "id": cid, "title": entry.get("title") or entry.get("channel") or "",
+                "artist": "", "followers": entry.get("channel_follower_count"),
+                "thumb": _best_thumb(entry)}
+    if "list=" in url:
+        pid = eid or urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("list", [""])[0]
+        if not re.fullmatch(r"[\w-]{2,64}", pid):
+            return None
+        return {"kind": "playlist", "id": pid, "title": entry.get("title") or "",
+                "artist": entry.get("channel") or entry.get("uploader") or "",
+                "count": entry.get("playlist_count"), "thumb": _best_thumb(entry)}
+    track = _flat_entry(entry)
+    if not track:
+        return None
+    track["kind"] = "video"
+    if entry.get("live_status") in ("is_live", "is_upcoming"):
+        track["live"] = entry["live_status"]
+    if "/shorts/" in url:
+        track["short"] = True
+    return track
+
+
+def _flat_page(url: str, start: int, count: int) -> tuple[dict, list]:
+    opts = {"extract_flat": "in_playlist", "noplaylist": False, "playlist_items": f"{start}-{start + count - 1}"}
+    with youtube_dl(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    return info, [e for e in info.get("entries") or [] if e]
+
+
+def search_youtube_all(query: str, page: int = 1) -> list[dict]:
+    """Lo mismo que muestra la página de resultados de YouTube: videos, Shorts, listas y canales."""
+    url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote_plus(query)
+    _, entries = _flat_page(url, (page - 1) * YT_PAGE + 1, YT_PAGE)
+    out, seen = [], set()
+    for entry in entries:
+        item = classify_entry(entry)
+        if item and (item["kind"], item["id"]) not in seen:
+            seen.add((item["kind"], item["id"]))
+            out.append(item)
+    return out
+
+
+def collection(kind: str, cid: str, page: int = 1) -> dict:
+    """Videos de una lista o de un canal de YouTube."""
+    if kind == "playlist" and re.fullmatch(r"[\w-]{2,64}", cid):
+        url = f"https://www.youtube.com/playlist?list={cid}"
+    elif kind == "channel" and re.fullmatch(r"UC[\w-]{22}", cid):
+        url = f"https://www.youtube.com/channel/{cid}/videos"
+    else:
+        raise ValueError("Lista o canal inválido")
+    info, entries = _flat_page(url, (page - 1) * COLLECTION_PAGE + 1, COLLECTION_PAGE)
+    tracks = [t for t in (classify_entry(e) for e in entries) if t and t["kind"] == "video"]
+    title = info.get("title") or ""
+    if kind == "channel":
+        title = re.sub(r"\s+-\s+Videos$", "", title)  # yt-dlp agrega " - Videos" al nombre del canal
+    return {"kind": kind, "id": cid, "title": title,
+            "artist": info.get("channel") or info.get("uploader") or "",
+            "tracks": tracks, "hasMore": len(entries) >= COLLECTION_PAGE}
+
+
+def search(query: str, kind: str, page: int = 1) -> list[dict]:
+    if kind != "songs":  # "youtube" (y el viejo "videos"): búsqueda de YouTube tal cual
+        return search_youtube_all(query, page)
     global _ytm
     first_error = None
     try:
@@ -958,9 +1046,13 @@ class Handler(BaseHTTPRequestHandler):
             text = q("q").strip()
             if not text:
                 return self._json([])
-            return self._json(search(text, q("type", "songs")))
+            page = max(1, min(20, int(q("page", "1") or 1)))
+            return self._json(search(text, q("type", "youtube"), page))
         if method == "GET" and parts == ["suggest"]:
             return self._json(suggestions(q("q").strip()) if q("q").strip() else [])
+        if method == "GET" and parts == ["collection"]:
+            page = max(1, min(100, int(q("page", "1") or 1)))
+            return self._json(collection(q("kind"), q("id"), page))
         if method == "GET" and len(parts) == 2 and parts[0] == "radio":
             return self._json(radio(parts[1]))
         if method == "GET" and len(parts) == 2 and parts[0] == "stream":
@@ -1044,10 +1136,13 @@ class Handler(BaseHTTPRequestHandler):
             if not rest and method == "GET":
                 return self._json(playlists)
             if not rest and method == "POST":
-                name = str(self._body().get("name") or "").strip()[:100]
+                body = self._body()
+                name = str(body.get("name") or "").strip()[:100]
                 if not name:
                     raise ValueError("La lista necesita un nombre")
-                pl = {"id": uuid.uuid4().hex[:10], "name": name, "tracks": [], "created": int(time.time())}
+                tracks = [clean_track(t) for t in (body.get("tracks") or [])[:5000] if isinstance(t, dict)]
+                pl = {"id": uuid.uuid4().hex[:10], "name": name, "tracks": [t for t in tracks if track_key(t)],
+                      "created": int(time.time())}
                 playlists.append(pl)
                 save_playlists(playlists)
                 return self._json(pl, 201)

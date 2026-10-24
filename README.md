@@ -49,8 +49,14 @@ conecta sola cuando el servicio vuelve. Firefox no permite instalar páginas com
 
 ## Cómo se usa
 
-- **Buscar:** escribí y apretá Buscar (o Enter). Podés elegir Canciones o Videos.
-  Si YouTube Music no responde, busca automáticamente en YouTube normal.
+- **Buscar:** escribí y apretá Buscar (o Enter).
+  - **YouTube** (la opción por defecto) busca igual que el buscador de YouTube, sin filtros:
+    videos, Shorts, listas y canales, 30 por vez con **Cargar más resultados**.
+  - **Ver lista** / **Ver canal** abre sus videos para reproducirlos o **Guardarlos como lista**
+    de RiPlay.
+  - Las transmisiones **en vivo** aparecen marcadas pero no se pueden reproducir ni descargar.
+  - **YouTube Music** busca solo canciones; si YouTube Music no responde, muestra videos de
+    YouTube para lo mismo que escribiste.
 - **Reproducir:** clic en el título. "Reproducir todo" carga la lista entera en la cola.
 - **Menú ⋯ de cada canción:** reproducir a continuación, agregar a la cola, iniciar radio
   (canciones parecidas), descargar y agregar a una lista.

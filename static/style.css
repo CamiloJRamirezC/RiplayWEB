@@ -222,6 +222,17 @@ ul.hint { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; m
 
 .dl-state { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
 .dl-done { color: var(--ink-2); }
+.tag { display: inline-block; font-size: 12px; font-weight: 700; line-height: 1; padding: 3px 6px; border-radius: 6px;
+       margin-right: 8px; vertical-align: 2px; background: var(--hover); color: var(--ink-2); }
+.tag-live { background: var(--accent-soft); color: var(--accent); }
+.track.not-playable .track-title { color: var(--ink-2); }
+.cover-round { border-radius: 50%; }
+.cover-stack { box-shadow: 4px -4px 0 -1px var(--surface), 4px -4px 0 0 var(--line); }
+.collection-row .track-actions .btn { padding: 6px 12px; font-size: 14px; white-space: nowrap; }
+.result-note { color: var(--ink-2); font-size: 14px; align-self: center; }
+.more-row { display: flex; justify-content: center; padding: 22px 0 6px; }
+.col-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1 1 auto; }
+.back-btn { align-self: flex-start; padding-left: 0; }
 .like-btn[aria-pressed="true"] { color: var(--accent); }
 .like-btn[aria-pressed="true"]:hover { color: var(--accent); }
 .like-btn.pop svg { animation: like-pop .32s ease-out; }

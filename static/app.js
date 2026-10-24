@@ -68,9 +68,9 @@ function toast(msg) {
 /* ============================================================ estado */
 
 const state = {
-  view: store.get("view", "search"),
+  view: store.get("view", "search") === "col" ? "search" : store.get("view", "search"),
   query: store.get("query", ""),
-  type: store.get("type", "songs"),
+  type: store.get("type", "youtube") === "songs" ? "songs" : "youtube",
   results: [],
   searchError: null,
   searched: false,
@@ -125,8 +125,23 @@ function renderNav() {
 function render() {
   renderNav();
   const main = $("#main");
+  // Si estaba escribiendo en el buscador, se conserva el foco y el cursor al redibujar
+  const typing = document.activeElement && document.activeElement.matches(".search-field input");
+  const sel = typing ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+  renderView(main);
+  if (typing) {
+    const input = main.querySelector(".search-field input");
+    if (input) { input.focus({ preventScroll: true }); try { input.setSelectionRange(...sel); } catch { /* sin selección */ } }
+  }
+}
+
+function renderView(main) {
   if (state.view === "search") main.replaceChildren(renderSearch());
   else if (state.view === "local") main.replaceChildren(renderLocal());
+  else if (state.view === "col") {
+    if (!state.collection) { state.view = "search"; return render(); }
+    main.replaceChildren(renderCollection());
+  }
   else if (state.view.startsWith("pl:")) {
     const pl = state.playlists.find((p) => "pl:" + p.id === state.view);
     if (!pl) { state.view = "search"; return render(); }
@@ -215,7 +230,7 @@ async function toggleLike(t, btn) {
 }
 
 function downloadButton(t) {
-  if (t.local || !t.id) return null;
+  if (t.local || !t.id || t.live) return null;
   const node = downloadButtonInner(t);
   node.dataset.dl = t.id;
   node._track = t;
@@ -245,17 +260,24 @@ function downloadButtonInner(t) {
   }, icon("download"));
 }
 
+const isPlayable = (t) => (!t.kind || t.kind === "video") && !t.live;
+const LIVE_LABEL = { is_live: "En vivo", is_upcoming: "Programado" };
+
 function trackRow(t, list, i, ctx = {}) {
   const current = state.queue[state.index];
   const playing = current && key(current) === key(t);
+  const play = () => (list && isPlayable(t)
+    ? playList(list, i)
+    : toast(t.live === "is_upcoming" ? "Esta transmisión todavía no empezó." : "Las transmisiones en vivo no se pueden reproducir en RiPlay."));
+  const tag = t.live ? el("span", { class: "tag tag-live", text: LIVE_LABEL[t.live] }) : t.short ? el("span", { class: "tag", text: "Short" }) : null;
   const row = el("li", {
-    class: "track" + (playing ? " playing" : ""),
-    ondblclick: () => playList(list, i),
+    class: "track" + (playing ? " playing" : "") + (isPlayable(t) ? "" : " not-playable"),
+    ondblclick: play,
   },
     coverImg(t),
     el("div", { class: "track-main" },
-      el("button", { class: "play-hit", title: "Reproducir", onclick: () => playList(list, i) },
-        el("div", { class: "track-title", text: t.title || "Sin título" })),
+      el("button", { class: "play-hit", title: isPlayable(t) ? "Reproducir" : LIVE_LABEL[t.live] || "", onclick: play },
+        el("div", { class: "track-title" }, tag, t.title || "Sin título")),
       el("div", { class: "track-artist", text: t.artist || "Artista desconocido" })),
     el("div", { class: "track-album", text: t.album || "" }),
     el("div", { class: "track-dur", text: t.duration ? fmt(t.duration) : "" }),
@@ -279,9 +301,10 @@ function trackList(list, ctx = {}) {
 let suggestTimer;
 function renderSearch() {
   const input = el("input", {
-    type: "search", value: state.query, placeholder: "Canción, artista o álbum",
+    type: "search", value: state.draft != null ? state.draft : state.query, placeholder: "Canción, artista o álbum",
     "aria-label": "Buscar", list: "suggestions", autocomplete: "off", enterkeyhint: "search",
     oninput: (e) => {
+      state.draft = e.target.value;
       // Elegir una sugerencia de la lista busca directamente
       if (e.inputType === "insertReplacementText" || e.inputType === undefined) { doSearch(e.target.value); return; }
       clearTimeout(suggestTimer);
@@ -305,8 +328,8 @@ function renderSearch() {
     el("form", { class: "search-form", role: "search", onsubmit: (e) => { e.preventDefault(); doSearch(input.value); } },
       el("label", { class: "search-field" }, icon("search"), input, el("datalist", { id: "suggestions" })),
       el("button", { class: "btn primary search-go", type: "submit" }, "Buscar")),
-    el("div", { class: "segmented", role: "group", "aria-label": "Tipo de resultado" },
-      typeBtn("songs", "Canciones"), typeBtn("videos", "Videos")));
+    el("div", { class: "segmented", role: "group", "aria-label": "Dónde buscar" },
+      typeBtn("youtube", "YouTube"), typeBtn("songs", "YouTube Music")));
 
   const problem = installProblem();
   let body;
@@ -315,15 +338,27 @@ function renderSearch() {
   else if (state.searched && !state.results.length)
     body = el("div", { class: "empty" }, el("strong", { text: `Sin resultados para “${state.query}”` }), "Probá con otro nombre o agregá el artista.");
   else if (state.results.length) {
+    const playable = state.results.filter(isPlayable);
     body = el("div", {},
       el("div", { class: "toolbar", style: "margin-bottom:14px" },
-        el("button", { class: "btn primary", onclick: () => playList(state.results, 0) }, icon("play"), "Reproducir todo")),
-      trackList(state.results));
+        playable.length ? el("button", { class: "btn primary", onclick: () => playList(playable, 0) }, icon("play"), "Reproducir todo") : null,
+        el("span", { class: "result-note", text: state.type === "youtube" ? "Resultados de YouTube, sin filtros" : "Canciones de YouTube Music" })),
+      el("ul", { class: "tracks" }, state.results.map((t) =>
+        t.kind === "playlist" || t.kind === "channel"
+          ? collectionRow(t)
+          : trackRow(t, isPlayable(t) ? playable : null, playable.indexOf(t)))),
+      state.hasMore
+        ? el("div", { class: "more-row" },
+            el("button", { class: "btn", disabled: state.loadingMore, onclick: loadMoreResults },
+              state.loadingMore ? "Cargando…" : "Cargar más resultados"))
+        : null);
   } else {
     body = el("div", { class: "empty" }, el("strong", { text: "¿Qué querés escuchar?" }),
-      "Escribí una canción, un artista o un álbum y apretá Buscar.");
+      state.type === "youtube"
+        ? "Busca en todo YouTube, igual que su buscador: videos, Shorts, listas y canales."
+        : "Busca solo canciones en YouTube Music.");
   }
-  setTimeout(() => { if (!state.results.length && !state.searching) input.focus(); });
+  if (!state.results.length && !state.searching) setTimeout(() => { if (input.isConnected) input.focus(); });
   return el("section", {}, head, problem, bar, body);
 }
 
@@ -338,23 +373,145 @@ function installProblem() {
   return el("div", { class: "error-box" }, el("strong", { text: "La búsqueda no puede funcionar todavía" }), ...lines.map((l) => el("p", { text: l })));
 }
 
+let searchSeq = 0;
 async function doSearch(q) {
   q = q.trim();
   if (!q) return;
+  const seq = ++searchSeq;
   state.query = q;
+  state.draft = q;
   store.set("query", q);
   state.searching = true;
+  state.loadingMore = false;
   state.searchError = null;
   render();
   try {
-    state.results = await api(`search?q=${encodeURIComponent(q)}&type=${state.type}`, { timeout: 75000 });
+    const results = await api(`search?q=${encodeURIComponent(q)}&type=${state.type}`, { timeout: 75000 });
+    if (seq !== searchSeq) return; // llegó tarde: ya hay una búsqueda más nueva
+    state.results = results;
+    state.page = 1;
+    state.hasMore = state.type === "youtube" && state.results.length >= 10;
   } catch (err) {
+    if (seq !== searchSeq) return;
     state.results = [];
+    state.hasMore = false;
     state.searchError = err.message + (state.status && state.status.log ? `  (Detalle en ${state.status.log})` : "");
   }
   state.searching = false;
   state.searched = true;
   if (state.view === "search") render();
+}
+
+async function loadMoreResults() {
+  if (state.loadingMore || !state.hasMore) return;
+  state.loadingMore = true;
+  render();
+  const seq = searchSeq;
+  try {
+    const next = await api(`search?q=${encodeURIComponent(state.query)}&type=youtube&page=${state.page + 1}`, { timeout: 75000 });
+    if (seq === searchSeq) { // si mientras tanto se hizo otra búsqueda, esta página se descarta
+      const seen = new Set(state.results.map((t) => (t.kind || "video") + ":" + t.id));
+      const fresh = next.filter((t) => !seen.has((t.kind || "video") + ":" + t.id));
+      state.results = state.results.concat(fresh);
+      state.page += 1;
+      state.hasMore = next.length >= 10 && fresh.length > 0 && state.page < 20;
+    }
+  } catch (err) { if (seq === searchSeq) toast(err.message); }
+  state.loadingMore = false;
+  if (state.view === "search") render();
+}
+
+/* ============================================================ listas y canales de YouTube */
+
+function collectionRow(item) {
+  const isChannel = item.kind === "channel";
+  const sub = isChannel
+    ? ["Canal", item.followers ? `${fmtCount(item.followers)} suscriptores` : null]
+    : ["Lista", item.count ? `${item.count} videos` : null, item.artist || null];
+  const open = () => openCollection(item);
+  const cover = coverImg(item);
+  cover.classList.add(isChannel ? "cover-round" : "cover-stack");
+  return el("li", { class: "track collection-row", ondblclick: open },
+    cover,
+    el("div", { class: "track-main" },
+      el("button", { class: "play-hit", title: isChannel ? "Ver los videos del canal" : "Ver la lista", onclick: open },
+        el("div", { class: "track-title", text: item.title || (isChannel ? "Canal" : "Lista") })),
+      el("div", { class: "track-artist", text: sub.filter(Boolean).join(" · ") })),
+    el("div", { class: "track-album" }),
+    el("div", { class: "track-dur" }),
+    el("div", { class: "track-actions" },
+      el("button", { class: "btn", onclick: open }, isChannel ? "Ver canal" : "Ver lista")));
+}
+
+function fmtCount(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(".", ",") + " M";
+  if (n >= 1e3) return Math.round(n / 1e3) + " mil";
+  return String(n);
+}
+
+function openCollection(item) {
+  state.collection = { kind: item.kind, id: item.id, title: item.title, artist: item.artist || "", thumb: item.thumb,
+                       tracks: [], page: 0, hasMore: true, loading: false, error: null };
+  setView("col");
+  loadCollectionPage();
+}
+
+async function loadCollectionPage() {
+  const c = state.collection;
+  if (!c || c.loading || !c.hasMore) return;
+  c.loading = true;
+  c.error = null;
+  if (state.view === "col") render();
+  try {
+    const data = await api(`collection?kind=${c.kind}&id=${encodeURIComponent(c.id)}&page=${c.page + 1}`, { timeout: 90000 });
+    if (state.collection !== c) return;
+    if (data.title) c.title = data.title;
+    if (data.artist && !c.artist) c.artist = data.artist;
+    const seen = new Set(c.tracks.map((t) => t.id));
+    c.tracks = c.tracks.concat(data.tracks.filter((t) => !seen.has(t.id)));
+    c.page += 1;
+    c.hasMore = data.hasMore;
+  } catch (err) {
+    c.error = err.message;
+  }
+  c.loading = false;
+  if (state.view === "col" && state.collection === c) render();
+}
+
+function renderCollection() {
+  const c = state.collection;
+  const playable = c.tracks.filter(isPlayable);
+  const head = el("div", { class: "view-head" },
+    el("div", { class: "col-head" },
+      el("button", { class: "text-btn back-btn", onclick: () => setView("search") }, "← Volver a los resultados"),
+      el("h1", { text: c.title || (c.kind === "channel" ? "Canal" : "Lista") })),
+    el("div", { class: "toolbar" },
+      playable.length ? el("button", { class: "btn primary", onclick: () => playList(playable, 0) }, icon("play"), "Reproducir todo") : null,
+      playable.length ? el("button", { class: "btn", onclick: () => saveCollectionAsPlaylist(c) }, icon("plus"), "Guardar como lista") : null));
+  const label = c.kind === "channel" ? "Videos del canal" : ["Lista de YouTube", c.artist].filter(Boolean).join(" · ");
+  const count = c.tracks.length ? ` · ${c.tracks.length}${c.hasMore ? "+" : ""} videos` : "";
+  const sub = el("p", { class: "view-sub", text: label + count });
+  let body;
+  if (c.error) body = el("div", { class: "error-box", text: c.error });
+  else if (!c.tracks.length && c.loading) body = el("p", { class: "loading", text: "Cargando videos…" });
+  else if (!c.tracks.length) body = el("div", { class: "empty" }, el("strong", { text: "No hay videos para mostrar" }));
+  else body = el("ul", { class: "tracks" }, c.tracks.map((t) => trackRow(t, isPlayable(t) ? playable : null, playable.indexOf(t))));
+  const more = c.tracks.length && c.hasMore
+    ? el("div", { class: "more-row" },
+        el("button", { class: "btn", disabled: c.loading, onclick: loadCollectionPage }, c.loading ? "Cargando…" : "Cargar más videos"))
+    : null;
+  return el("section", {}, head, sub, body, more);
+}
+
+async function saveCollectionAsPlaylist(c) {
+  const name = prompt("Nombre de la lista en RiPlay:", c.title || "");
+  if (!name || !name.trim()) return;
+  try {
+    const pl = await api("playlists", { method: "POST", body: { name: name.trim(), tracks: c.tracks.filter(isPlayable) } });
+    state.playlists.push(pl);
+    toast(`Lista “${pl.name}” guardada con ${pl.tracks.length} videos${c.hasMore ? " (los cargados hasta ahora)" : ""}`);
+    renderNav();
+  } catch (err) { toast(err.message); }
 }
 
 /* ============================================================ vista: en el disco */
@@ -676,11 +833,13 @@ function openTrackMenu(anchor, t, ctx) {
     ...(likeKey(t) && !(ctx.playlist && ctx.playlist.special === "favorites")
       ? [{ icon: liked ? "heart-fill" : "heart", text: liked ? "Quitar de Favoritos" : "Me gusta", action: () => toggleLike(t) }]
       : []),
-    { icon: "play", text: "Reproducir a continuación", action: () => playNext(t) },
-    { icon: "queue", text: "Agregar a la cola", action: () => enqueue(t) },
+    ...(isPlayable(t) ? [
+      { icon: "play", text: "Reproducir a continuación", action: () => playNext(t) },
+      { icon: "queue", text: "Agregar a la cola", action: () => enqueue(t) },
+    ] : []),
   ];
   if (t.id) items.push({ icon: "radio", text: "Iniciar radio", action: () => startRadio(t) });
-  if (t.id && !t.local) items.push({ icon: "download", text: "Descargar", action: () => download(t) });
+  if (t.id && !t.local && !t.live) items.push({ icon: "download", text: "Descargar", action: () => download(t) });
   items.push("-", { label: "Agregar a una lista" });
   for (const pl of state.playlists) {
     if (ctx.playlist && pl.id === ctx.playlist.id) continue;
