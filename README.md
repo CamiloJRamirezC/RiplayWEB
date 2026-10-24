@@ -54,6 +54,10 @@ conecta sola cuando el servicio vuelve. Firefox no permite instalar páginas com
 - **Reproducir:** clic en el título. "Reproducir todo" carga la lista entera en la cola.
 - **Menú ⋯ de cada canción:** reproducir a continuación, agregar a la cola, iniciar radio
   (canciones parecidas), descargar y agregar a una lista.
+- **Me gusta:** el corazón de cada canción (y el del reproductor) la guarda en **Favoritos**, que
+  aparece primera en la barra lateral, con las últimas que te gustaron arriba. Tocarlo de nuevo la
+  quita. Si ya tenías una lista llamada "Favoritos", usa esa. Una canción descargada cuenta como la
+  misma que su versión online.
 - **Listas:** en la barra lateral, **Nueva lista** crea una vacía. También desde el menú ⋯ de
   cualquier canción → "Nueva lista…" (la crea con esa canción adentro).
 - **Importar de Spotify:** pegá el enlace de una playlist o álbum (en Spotify: ⋯ → Compartir →

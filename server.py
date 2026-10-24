@@ -646,6 +646,62 @@ def _find_playlist(playlists, pid):
     raise KeyError("Lista no encontrada")
 
 
+# ---------------------------------------------------------------- favoritos (like)
+
+FAVORITES_NAME = "Favoritos"
+
+
+def track_key(track: dict) -> str:
+    """Identifica una canción: su id de YouTube, o el nombre del archivo si es local."""
+    if track.get("id"):
+        return str(track["id"])
+    if track.get("local"):
+        return "local:" + str(track["local"])
+    return ""
+
+
+def _favorites(playlists: list[dict], create: bool) -> dict | None:
+    for p in playlists:
+        if p.get("special") == "favorites":
+            return p
+    # Si ya existía una lista llamada "Favoritos", se usa esa en vez de crear otra
+    for p in playlists:
+        if p.get("name", "").strip().lower() == FAVORITES_NAME.lower():
+            p["special"] = "favorites"
+            return p
+    if not create:
+        return None
+    pl = {"id": "favoritos-" + uuid.uuid4().hex[:6], "name": FAVORITES_NAME, "tracks": [],
+          "created": int(time.time()), "special": "favorites"}
+    playlists.insert(0, pl)
+    return pl
+
+
+def like_track(track: dict) -> dict:
+    track = clean_track(track)
+    key = track_key(track)
+    if not key:
+        raise ValueError("No se puede marcar esta canción")
+    with _file_lock:
+        playlists = load_playlists()
+        fav = _favorites(playlists, create=True)
+        if all(track_key(t) != key for t in fav["tracks"]):
+            fav["tracks"].insert(0, track)  # las últimas que te gustaron, arriba
+        save_playlists(playlists)
+        return fav
+
+
+def unlike_track(key: str) -> dict | None:
+    with _file_lock:
+        playlists = load_playlists()
+        fav = _favorites(playlists, create=False)
+        if fav is None:
+            return None
+        fav["tracks"] = [t for t in fav["tracks"] if track_key(t) != key]
+        save_playlists(playlists)
+        return fav
+
+
 # ---------------------------------------------------------------- importar desde Spotify
 
 
@@ -967,6 +1023,15 @@ class Handler(BaseHTTPRequestHandler):
                 if not job:
                     raise KeyError("Importación no encontrada")
                 return self._json(dict(job))
+
+        if parts == ["likes"]:
+            if method == "POST":
+                return self._json(like_track(self._body().get("track") or {}))
+            if method == "DELETE":
+                key = q("key").strip()
+                if not key:
+                    raise ValueError("Falta la canción")
+                return self._json(unlike_track(key))
 
         if parts and parts[0] == "playlists":
             return self._playlists(method, parts[1:])

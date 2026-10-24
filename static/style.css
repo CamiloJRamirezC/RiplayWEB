@@ -222,6 +222,12 @@ ul.hint { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; m
 
 .dl-state { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
 .dl-done { color: var(--ink-2); }
+.like-btn[aria-pressed="true"] { color: var(--accent); }
+.like-btn[aria-pressed="true"]:hover { color: var(--accent); }
+.like-btn.pop svg { animation: like-pop .32s ease-out; }
+@keyframes like-pop { 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
+.now .like-btn { flex: none; }
+.pl-link.is-favorites svg { color: var(--accent); }
 .dl-status { color: var(--accent); font-weight: 700; }
 .dl-status.is-error { color: var(--danger); font-weight: 400; white-space: normal; }
 

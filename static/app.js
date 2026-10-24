@@ -104,13 +104,15 @@ function renderNav() {
     if (b.dataset.view === state.view) b.setAttribute("aria-current", "page");
   });
   const nav = $("#playlist-nav");
+  const fav = favoritesPl();
+  const ordered = fav ? [fav, ...state.playlists.filter((p) => p !== fav)] : state.playlists;
   nav.replaceChildren(
-    ...state.playlists.map((p) =>
+    ...ordered.map((p) =>
       el("button", {
-        class: "pl-link",
+        class: "pl-link" + (p === fav ? " is-favorites" : ""),
         "aria-current": state.view === "pl:" + p.id ? "page" : null,
         onclick: () => setView("pl:" + p.id),
-      }, icon("list"), el("span", { text: p.name }), el("small", { text: String(p.tracks.length) }))
+      }, icon(p === fav ? "heart-fill" : "list"), el("span", { text: p.name }), el("small", { text: String(p.tracks.length) }))
     )
   );
   const active = Object.values(state.downloads).filter((d) => d.status === "queued" || d.status === "downloading").length;
@@ -137,6 +139,79 @@ function render() {
 function coverImg(t, size = 48) {
   if (t.thumb) return el("img", { class: "cover", src: t.thumb, alt: "", loading: "lazy", width: size, height: size, referrerpolicy: "no-referrer" });
   return el("div", { class: "cover blank", style: `width:${size}px;height:${size}px` }, icon("disk"));
+}
+
+/* ============================================================ me gusta / Favoritos */
+
+const likeKey = (t) => (t.id ? t.id : t.local ? "local:" + t.local : "");
+const favoritesPl = () => state.playlists.find((p) => p.special === "favorites") || null;
+
+function isLiked(t) {
+  const fav = favoritesPl();
+  const k = likeKey(t);
+  return !!(fav && k && fav.tracks.some((x) => likeKey(x) === k));
+}
+
+function likeButton(t) {
+  if (!likeKey(t)) return null;
+  const liked = isLiked(t);
+  const b = el("button", {
+    class: "icon-btn like-btn", "aria-pressed": String(liked),
+    title: liked ? "Quitar de Favoritos" : "Me gusta",
+    "aria-label": `${liked ? "Quitar de Favoritos" : "Agregar a Favoritos"}: ${t.title}`,
+    onclick: (e) => { e.stopPropagation(); toggleLike(t, e.currentTarget); },
+  }, icon(liked ? "heart-fill" : "heart"));
+  b.dataset.like = likeKey(t);
+  b._track = t;
+  return b;
+}
+
+function refreshLikeButtons() {
+  document.querySelectorAll(".tracks [data-like]").forEach((b) => {
+    const fresh = likeButton(b._track);
+    const hadFocus = b === document.activeElement;
+    if (b.classList.contains("pop")) fresh.classList.add("pop");
+    b.replaceWith(fresh);
+    if (hadFocus) fresh.focus();
+  });
+  updateLikeCurrent();
+}
+
+function updateLikeCurrent() {
+  const t = state.queue[state.index];
+  const b = $("#btn-like");
+  b.hidden = !t || !likeKey(t);
+  if (b.hidden) return;
+  const liked = isLiked(t);
+  b.setAttribute("aria-pressed", String(liked));
+  b.title = liked ? "Quitar de Favoritos" : "Me gusta";
+  b.setAttribute("aria-label", liked ? "Quitar de Favoritos" : "Agregar a Favoritos");
+  b.replaceChildren(icon(liked ? "heart-fill" : "heart"));
+}
+
+function setFavorites(pl) {
+  if (!pl) return;
+  const i = state.playlists.findIndex((p) => p.id === pl.id);
+  if (i >= 0) state.playlists[i] = pl; else state.playlists.unshift(pl);
+}
+
+let likeBusy = false;
+async function toggleLike(t, btn) {
+  if (likeBusy || !likeKey(t)) return;
+  likeBusy = true;
+  const liked = isLiked(t);
+  if (btn && !liked) { btn.classList.remove("pop"); void btn.offsetWidth; btn.classList.add("pop"); }
+  try {
+    const pl = liked
+      ? await api("likes?key=" + encodeURIComponent(likeKey(t)), { method: "DELETE" })
+      : await api("likes", { method: "POST", body: { track: t } });
+    setFavorites(pl);
+    toast(liked ? "Quitada de Favoritos" : "Agregada a Favoritos");
+    const fav = favoritesPl();
+    if (fav && state.view === "pl:" + fav.id) render(); else { renderNav(); refreshLikeButtons(); }
+    updateLikeCurrent();
+  } catch (err) { toast(err.message); }
+  likeBusy = false;
 }
 
 function downloadButton(t) {
@@ -185,6 +260,7 @@ function trackRow(t, list, i, ctx = {}) {
     el("div", { class: "track-album", text: t.album || "" }),
     el("div", { class: "track-dur", text: t.duration ? fmt(t.duration) : "" }),
     el("div", { class: "track-actions" },
+      likeButton(t),
       downloadButton(t),
       el("button", {
         class: "icon-btn", title: "Más opciones", "aria-label": `Más opciones para ${t.title}`, "aria-haspopup": "menu",
@@ -354,13 +430,16 @@ function renderPlaylist(pl) {
     el("div", { class: "toolbar" },
       pl.tracks.length ? el("button", { class: "btn primary", onclick: () => playList(pl.tracks, 0) }, icon("play"), "Reproducir") : null,
       pl.tracks.length ? el("button", { class: "btn", onclick: () => downloadAll(pl.tracks) }, icon("download"), "Descargar todas") : null,
-      el("button", { class: "btn", onclick: () => renamePlaylist(pl) }, "Renombrar"),
+      pl.special === "favorites" ? null : el("button", { class: "btn", onclick: () => renamePlaylist(pl) }, "Renombrar"),
       el("button", { class: "btn danger", onclick: () => deletePlaylist(pl) }, "Borrar lista")));
   const total = pl.tracks.reduce((s, t) => s + (t.duration || 0), 0);
   const sub = el("p", { class: "view-sub", text: pl.tracks.length ? `${pl.tracks.length} ${pl.tracks.length === 1 ? "canción" : "canciones"}, ${fmt(total)}` : "" });
   const body = pl.tracks.length ? trackList(pl.tracks, { playlist: pl }) :
-    el("div", { class: "empty" }, el("strong", { text: "Esta lista está vacía" }),
-      "En Buscar o En el disco, abrí el menú ⋯ de una canción y elegí “", pl.name, "”.");
+    pl.special === "favorites"
+      ? el("div", { class: "empty" }, el("strong", { text: "Todavía no hay favoritas" }),
+          "Tocá el corazón de cualquier canción y va a aparecer acá.")
+      : el("div", { class: "empty" }, el("strong", { text: "Esta lista está vacía" }),
+          "En Buscar o En el disco, abrí el menú ⋯ de una canción y elegí “", pl.name, "”.");
   return el("section", {}, head, sub, body);
 }
 
@@ -524,6 +603,7 @@ async function addToPlaylist(pl, t) {
 }
 
 async function removeFromPlaylist(pl, position) {
+  if (pl.special === "favorites" && pl.tracks[position]) return toggleLike(pl.tracks[position]);
   try {
     Object.assign(pl, await api(`playlists/${pl.id}/tracks/${position}`, { method: "DELETE" }));
     render();
@@ -591,7 +671,11 @@ function openMenu(anchor, items) {
 }
 
 function openTrackMenu(anchor, t, ctx) {
+  const liked = isLiked(t);
   const items = [
+    ...(likeKey(t) && !(ctx.playlist && ctx.playlist.special === "favorites")
+      ? [{ icon: liked ? "heart-fill" : "heart", text: liked ? "Quitar de Favoritos" : "Me gusta", action: () => toggleLike(t) }]
+      : []),
     { icon: "play", text: "Reproducir a continuación", action: () => playNext(t) },
     { icon: "queue", text: "Agregar a la cola", action: () => enqueue(t) },
   ];
@@ -600,6 +684,7 @@ function openTrackMenu(anchor, t, ctx) {
   items.push("-", { label: "Agregar a una lista" });
   for (const pl of state.playlists) {
     if (ctx.playlist && pl.id === ctx.playlist.id) continue;
+    if (pl.special === "favorites") continue; // se agrega con el corazón
     items.push({ icon: "list", text: pl.name, action: () => addToPlaylist(pl, t) });
   }
   items.push({ icon: "plus", text: "Nueva lista…", action: () => createPlaylist(t) });
@@ -786,6 +871,7 @@ function updateNow() {
     $("#now-artist").textContent = "Elegí una canción para empezar";
     cover.hidden = true;
     document.title = "RiPlay";
+    updateLikeCurrent();
     return;
   }
   $("#now-title").textContent = t.title || "Sin título";
@@ -793,6 +879,7 @@ function updateNow() {
   if (t.thumb) { cover.src = t.thumb; cover.hidden = false; } else cover.hidden = true;
   document.title = `${t.title} — RiPlay`;
   updateDownloadCurrent();
+  updateLikeCurrent();
   if ("mediaSession" in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: t.title || "", artist: t.artist || "", album: t.album || "",
@@ -892,6 +979,7 @@ $("#btn-next").addEventListener("click", () => next());
 $("#btn-prev").addEventListener("click", prev);
 $("#btn-shuffle").addEventListener("click", shuffleQueue);
 $("#btn-repeat").addEventListener("click", cycleRepeat);
+$("#btn-like").addEventListener("click", (e) => { const t = state.queue[state.index]; if (t) toggleLike(t, e.currentTarget); });
 $("#btn-dl-current").addEventListener("click", () => { const t = state.queue[state.index]; if (t) download(t); });
 $("#btn-queue").addEventListener("click", () => {
   const q = $("#queue");
@@ -981,6 +1069,7 @@ if ("serviceWorker" in navigator) {
   renderQueue();
   render();
   await loadPlaylists();
+  updateLikeCurrent();
   api("config").then((c) => { state.config = c; }).catch(() => {});
   api("status").then((st) => { state.status = st; if (state.view === "search") render(); }).catch(() => {});
   pollDownloads();
