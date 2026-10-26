@@ -68,9 +68,9 @@ function toast(msg) {
 /* ============================================================ estado */
 
 const state = {
-  view: store.get("view", "search") === "col" ? "search" : store.get("view", "search"),
+  view: ["col", "artist"].includes(store.get("view", "search")) ? "search" : store.get("view", "search"),
   query: store.get("query", ""),
-  type: store.get("type", "youtube") === "songs" ? "songs" : "youtube",
+  type: ["songs", "artists"].includes(store.get("type", "youtube")) ? store.get("type", "youtube") : "youtube",
   results: [],
   searchError: null,
   searched: false,
@@ -138,8 +138,12 @@ function render() {
 function renderView(main) {
   if (state.view === "search") main.replaceChildren(renderSearch());
   else if (state.view === "local") main.replaceChildren(renderLocal());
+  else if (state.view === "artist") {
+    if (!state.artist) { state.view = "search"; return renderView(main); }
+    main.replaceChildren(renderArtist());
+  }
   else if (state.view === "col") {
-    if (!state.collection) { state.view = "search"; return render(); }
+    if (!state.collection) { state.view = "search"; return renderView(main); }
     main.replaceChildren(renderCollection());
   }
   else if (state.view.startsWith("pl:")) {
@@ -329,7 +333,7 @@ function renderSearch() {
       el("label", { class: "search-field" }, icon("search"), input, el("datalist", { id: "suggestions" })),
       el("button", { class: "btn primary search-go", type: "submit" }, "Buscar")),
     el("div", { class: "segmented", role: "group", "aria-label": "Dónde buscar" },
-      typeBtn("youtube", "YouTube"), typeBtn("songs", "YouTube Music")));
+      typeBtn("youtube", "YouTube"), typeBtn("songs", "YouTube Music"), typeBtn("artists", "Artistas")));
 
   const problem = installProblem();
   let body;
@@ -342,10 +346,14 @@ function renderSearch() {
     body = el("div", {},
       el("div", { class: "toolbar", style: "margin-bottom:14px" },
         playable.length ? el("button", { class: "btn primary", onclick: () => playList(playable, 0) }, icon("play"), "Reproducir todo") : null,
-        el("span", { class: "result-note", text: state.type === "youtube" ? "Resultados de YouTube, sin filtros" : "Canciones de YouTube Music" })),
+        el("span", { class: "result-note", text: {
+          youtube: "Resultados de YouTube, sin filtros",
+          songs: "Canciones de YouTube Music",
+          artists: state.results.some((r) => r.fromYouTube) ? "YouTube Music no respondió: canales de YouTube" : "Artistas de YouTube Music",
+        }[state.type] })),
       el("ul", { class: "tracks" }, state.results.map((t) =>
-        t.kind === "playlist" || t.kind === "channel"
-          ? collectionRow(t)
+        t.kind === "artist" ? artistRow(t)
+          : t.kind === "playlist" || t.kind === "channel" ? collectionRow(t)
           : trackRow(t, isPlayable(t) ? playable : null, playable.indexOf(t)))),
       state.hasMore
         ? el("div", { class: "more-row" },
@@ -354,9 +362,9 @@ function renderSearch() {
         : null);
   } else {
     body = el("div", { class: "empty" }, el("strong", { text: "¿Qué querés escuchar?" }),
-      state.type === "youtube"
-        ? "Busca en todo YouTube, igual que su buscador: videos, Shorts, listas y canales."
-        : "Busca solo canciones en YouTube Music.");
+      { youtube: "Busca en todo YouTube, igual que su buscador: videos, Shorts, listas y canales.",
+        songs: "Busca solo canciones en YouTube Music.",
+        artists: "Busca un artista para ver toda su discografía: álbumes, EP y singles." }[state.type]);
   }
   if (!state.results.length && !state.searching) setTimeout(() => { if (input.isConnected) input.focus(); });
   return el("section", {}, head, problem, bar, body);
@@ -449,9 +457,9 @@ function fmtCount(n) {
   return String(n);
 }
 
-function openCollection(item) {
+function openCollection(item, back = null) {
   state.collection = { kind: item.kind, id: item.id, title: item.title, artist: item.artist || "", thumb: item.thumb,
-                       tracks: [], page: 0, hasMore: true, loading: false, error: null };
+                       tracks: [], page: 0, hasMore: true, loading: false, error: null, back };
   setView("col");
   loadCollectionPage();
 }
@@ -463,7 +471,10 @@ async function loadCollectionPage() {
   c.error = null;
   if (state.view === "col") render();
   try {
-    const data = await api(`collection?kind=${c.kind}&id=${encodeURIComponent(c.id)}&page=${c.page + 1}`, { timeout: 90000 });
+    const data = c.kind === "album"
+      ? await api(`album?id=${encodeURIComponent(c.id)}`, { timeout: 90000 })
+      : await api(`collection?kind=${c.kind}&id=${encodeURIComponent(c.id)}&page=${c.page + 1}`, { timeout: 90000 });
+    if (c.kind === "album" && data.year) c.year = data.year;
     if (state.collection !== c) return;
     if (data.title) c.title = data.title;
     if (data.artist && !c.artist) c.artist = data.artist;
@@ -483,13 +494,17 @@ function renderCollection() {
   const playable = c.tracks.filter(isPlayable);
   const head = el("div", { class: "view-head" },
     el("div", { class: "col-head" },
-      el("button", { class: "text-btn back-btn", onclick: () => setView("search") }, "← Volver a los resultados"),
+      el("button", { class: "text-btn back-btn", onclick: () => setView(c.back ? c.back.view : "search") },
+        "← " + (c.back ? c.back.label : "Volver a los resultados")),
       el("h1", { text: c.title || (c.kind === "channel" ? "Canal" : "Lista") })),
     el("div", { class: "toolbar" },
       playable.length ? el("button", { class: "btn primary", onclick: () => playList(playable, 0) }, icon("play"), "Reproducir todo") : null,
       playable.length ? el("button", { class: "btn", onclick: () => saveCollectionAsPlaylist(c) }, icon("plus"), "Guardar como lista") : null));
-  const label = c.kind === "channel" ? "Videos del canal" : ["Lista de YouTube", c.artist].filter(Boolean).join(" · ");
-  const count = c.tracks.length ? ` · ${c.tracks.length}${c.hasMore ? "+" : ""} videos` : "";
+  const label = c.kind === "channel" ? "Videos del canal"
+    : c.kind === "album" ? [RELEASE_LABEL[c.releaseKind] || "Álbum", c.year, c.artist].filter(Boolean).join(" · ")
+    : ["Lista de YouTube", c.artist].filter(Boolean).join(" · ");
+  const unit = c.kind === "album" ? (c.tracks.length === 1 ? "canción" : "canciones") : "videos";
+  const count = c.tracks.length ? ` · ${c.tracks.length}${c.hasMore ? "+" : ""} ${unit}` : "";
   const sub = el("p", { class: "view-sub", text: label + count });
   let body;
   if (c.error) body = el("div", { class: "error-box", text: c.error });
@@ -512,6 +527,177 @@ async function saveCollectionAsPlaylist(c) {
     toast(`Lista “${pl.name}” guardada con ${pl.tracks.length} videos${c.hasMore ? " (los cargados hasta ahora)" : ""}`);
     renderNav();
   } catch (err) { toast(err.message); }
+}
+
+/* ============================================================ artistas y discografía */
+
+const RELEASE_LABEL = { album: "Álbum", single: "Single", ep: "EP" };
+const SORTS = [
+  ["year-desc", "Año: más nuevos primero"],
+  ["year-asc", "Año: más viejos primero"],
+  ["popularity", "Relevancia"],
+  ["likes", "Tus me gusta"],
+];
+
+function artistRow(item) {
+  const open = () => openArtist(item);
+  const cover = coverImg(item);
+  cover.classList.add("cover-round");
+  return el("li", { class: "track collection-row", ondblclick: open },
+    cover,
+    el("div", { class: "track-main" },
+      el("button", { class: "play-hit", title: "Ver discografía", onclick: open },
+        el("div", { class: "track-title", text: item.title || "Artista" })),
+      el("div", { class: "track-artist", text: ["Artista", item.subscribers ? `${item.subscribers} suscriptores` : null].filter(Boolean).join(" · ") })),
+    el("div", { class: "track-album" }),
+    el("div", { class: "track-dur" }),
+    el("div", { class: "track-actions" }, el("button", { class: "btn", onclick: open }, "Ver artista")));
+}
+
+function openArtist(item) {
+  state.artist = {
+    id: item.id, name: item.title || "", thumb: item.thumb, data: null, loading: true, error: null,
+    filter: "all", sort: store.get("artistSort", "year-desc"), popOrder: null, popLoading: false,
+  };
+  setView("artist");
+  loadArtist(state.artist);
+}
+
+async function loadArtist(a) {
+  try {
+    const data = await api("artist?id=" + encodeURIComponent(a.id), { timeout: 90000 });
+    if (state.artist !== a) return;
+    a.data = data;
+    a.name = data.name || a.name;
+    a.thumb = data.thumb || a.thumb;
+    if (a.sort === "popularity") loadPopularity(a);
+  } catch (err) {
+    if (state.artist !== a) return;
+    a.error = err.message;
+  }
+  a.loading = false;
+  if (state.view === "artist" && state.artist === a) render();
+}
+
+async function loadPopularity(a) {
+  if (a.popOrder || a.popLoading) return;
+  a.popLoading = true;
+  try {
+    const ids = await api(`artist/order?id=${encodeURIComponent(a.id)}&order=popularity`, { timeout: 90000 });
+    a.popOrder = new Map(ids.map((id, i) => [id, i]));
+  } catch (err) { toast("No se pudo ordenar por relevancia: " + err.message); }
+  a.popLoading = false;
+  if (state.view === "artist" && state.artist === a) render();
+}
+
+const normTitle = (s) => (s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+  .replace(/\s*[\(\[].*?[\)\]]/g, "").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+// Cuántas canciones de cada lanzamiento están en Favoritos (por nombre del álbum)
+function likesByRelease(a) {
+  const fav = favoritesPl();
+  const counts = new Map();
+  if (!fav) return counts;
+  const name = normTitle(a.name);
+  for (const t of fav.tracks) {
+    if (!t.album) continue;
+    if (name && t.artist && !normTitle(t.artist).includes(name) && t.artistId !== a.id) continue;
+    const key = normTitle(t.album);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  return counts;
+}
+
+function sortedReleases(a) {
+  const likes = likesByRelease(a);
+  let list = a.data.releases.map((r) => ({ ...r, likes: likes.get(normTitle(r.title)) || 0 }));
+  if (a.filter === "album") list = list.filter((r) => r.kind === "album");
+  if (a.filter === "single") list = list.filter((r) => r.kind !== "album");
+  const byYear = (dir) => (x, y) => (x.year == null) - (y.year == null) || dir * ((x.year || 0) - (y.year || 0)) || x.rank - y.rank;
+  if (a.sort === "year-asc") list.sort(byYear(1));
+  else if (a.sort === "popularity" && a.popOrder) {
+    const pos = (r) => (a.popOrder.has(r.id) ? a.popOrder.get(r.id) : 1e6 + r.rank);
+    list.sort((x, y) => pos(x) - pos(y));
+  } else if (a.sort === "likes") list.sort((x, y) => y.likes - x.likes || byYear(-1)(x, y));
+  else list.sort(byYear(-1));
+  return list;
+}
+
+function releaseCard(r, a) {
+  const open = () => openAlbum(r, a);
+  const meta = [RELEASE_LABEL[r.kind], r.year].filter(Boolean).join(" · ");
+  return el("li", { class: "release" },
+    el("button", { class: "release-hit", onclick: open, title: `Ver ${r.title}` },
+      r.thumb ? el("img", { class: "release-cover", src: r.thumb, alt: "", loading: "lazy", referrerpolicy: "no-referrer" })
+        : el("div", { class: "release-cover blank" }, icon("disk")),
+      el("span", { class: "release-title", text: r.title }),
+      el("span", { class: "release-meta" }, meta,
+        r.likes ? el("span", { class: "release-likes", title: `${r.likes} en Favoritos` }, icon("heart-fill"), String(r.likes)) : null)));
+}
+
+function openAlbum(r, a) {
+  state.collection = {
+    kind: "album", id: r.id, title: r.title, artist: a ? a.name : "", thumb: r.thumb, year: r.year, releaseKind: r.kind,
+    tracks: [], page: 0, hasMore: true, loading: false, error: null,
+    back: a ? { view: "artist", label: `Volver a ${a.name}` } : null,
+  };
+  setView("col");
+  loadCollectionPage();
+}
+
+function renderArtist() {
+  const a = state.artist;
+  const back = el("button", { class: "text-btn back-btn", onclick: () => setView("search") }, "← Volver a la búsqueda");
+  const cover = a.thumb ? el("img", { class: "artist-photo", src: a.thumb, alt: "", referrerpolicy: "no-referrer" })
+    : el("div", { class: "artist-photo blank" }, icon("artist"));
+  const d = a.data;
+  const head = el("div", { class: "artist-head" }, cover,
+    el("div", { class: "artist-info" }, back,
+      el("h1", { text: a.name || "Artista" }),
+      el("p", { class: "view-sub", text: d ? [d.subscribers ? `${d.subscribers} suscriptores` : null,
+        `${d.releases.length} lanzamientos`].filter(Boolean).join(" · ") : "" })));
+  if (a.loading) return el("section", {}, head, el("p", { class: "loading", text: "Cargando discografía…" }));
+  if (a.error) return el("section", {}, head, el("div", { class: "error-box" }, a.error),
+    el("button", { class: "btn", onclick: () => openCollection({ kind: "channel", id: a.id, title: a.name }, { view: "artist", label: `Volver a ${a.name}` }) }, "Ver los videos del canal"));
+
+  const fav = likesByRelease(a);
+  const top = a.sort === "likes" ? [...d.topSongs].sort((x, y) => isLiked(y) - isLiked(x)) : d.topSongs;
+  const popular = el("section", { class: "artist-section" },
+    el("div", { class: "section-head" },
+      el("h2", { class: "section-title", text: "Populares" }),
+      el("div", { class: "toolbar" },
+        top.length ? el("button", { class: "btn primary", onclick: () => playList(top, 0) }, icon("play"), "Reproducir") : null,
+        d.songsPlaylist ? el("button", { class: "btn", onclick: () => openCollection({ kind: "playlist", id: d.songsPlaylist, title: `Canciones de ${a.name}` }, { view: "artist", label: `Volver a ${a.name}` }) }, "Ver todas") : null)),
+    top.length ? el("ul", { class: "tracks" }, top.slice(0, 10).map((t, i) => trackRow(t, top, i)))
+      : el("p", { class: "hint", text: "YouTube Music no muestra canciones populares para este artista." }));
+
+  const counts = { all: d.releases.length, album: d.releases.filter((r) => r.kind === "album").length };
+  counts.single = counts.all - counts.album;
+  const chip = (id, label) => el("button", {
+    class: "chip", "aria-pressed": String(a.filter === id),
+    onclick: () => { a.filter = id; render(); },
+  }, `${label} ${counts[id]}`);
+  const sortSel = el("select", {
+    class: "sort-select", "aria-label": "Ordenar discografía",
+    onchange: (e) => {
+      a.sort = e.target.value;
+      store.set("artistSort", a.sort);
+      if (a.sort === "popularity") loadPopularity(a);
+      render();
+    },
+  }, SORTS.map(([v, label]) => el("option", { value: v, selected: a.sort === v }, label)));
+  const releases = sortedReleases(a);
+  const discog = el("section", { class: "artist-section" },
+    el("div", { class: "section-head" },
+      el("h2", { class: "section-title", text: "Discografía" }),
+      el("div", { class: "discog-controls" },
+        el("div", { class: "chips" }, chip("all", "Todo"), chip("album", "Álbumes"), chip("single", "Singles y EP")),
+        sortSel)),
+    a.sort === "popularity" && a.popLoading ? el("p", { class: "hint", text: "Ordenando por relevancia…" }) : null,
+    a.sort === "likes" && !fav.size ? el("p", { class: "hint", text: "Todavía no tenés canciones de este artista en Favoritos: se muestran por año." }) : null,
+    releases.length ? el("ul", { class: "release-grid" }, releases.map((r) => releaseCard(r, a)))
+      : el("p", { class: "hint", text: "No hay lanzamientos en esta categoría." }));
+  return el("section", {}, head, popular, discog);
 }
 
 /* ============================================================ vista: en el disco */
@@ -839,6 +1025,7 @@ function openTrackMenu(anchor, t, ctx) {
     ] : []),
   ];
   if (t.id) items.push({ icon: "radio", text: "Iniciar radio", action: () => startRadio(t) });
+  if (t.artistId) items.push({ icon: "artist", text: "Ir al artista", action: () => openArtist({ id: t.artistId, title: (t.artist || "").split(",")[0] }) });
   if (t.id && !t.local && !t.live) items.push({ icon: "download", text: "Descargar", action: () => download(t) });
   items.push("-", { label: "Agregar a una lista" });
   for (const pl of state.playlists) {

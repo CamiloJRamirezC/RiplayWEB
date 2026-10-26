@@ -119,7 +119,9 @@ def library_status() -> dict:
 _ytm = None
 _ytm_lock = threading.Lock()
 # Salud de YouTube Music: en algunas compus/regiones devuelve listas vacías.
-_ytm_health = {"lang": "es", "tried_en": False, "empty_streak": 0, "skip_until": 0.0}
+# Idioma para leer YouTube Music. En algunas versiones de ytmusicapi el español no interpreta bien
+# las respuestas (búsquedas vacías); por eso se arranca en inglés y se recuerda el que funcionó.
+_ytm_health = {"lang": "en", "tried_other": False, "empty_streak": 0, "skip_until": 0.0}
 
 
 def _new_ytmusic(lang: str):
@@ -131,6 +133,22 @@ def _new_ytmusic(lang: str):
     session = requests.Session()
     session.request = partial(session.request, timeout=15)  # type: ignore[method-assign]
     return YTMusic(language=lang, requests_session=session)
+
+
+def _save_ytm_lang(lang: str) -> None:
+    try:
+        with _file_lock:
+            cfg = get_config()
+            cfg["ytmLang"] = lang
+            _write_json("config.json", cfg)
+    except Exception as exc:
+        log.warning("No se pudo guardar el idioma de YouTube Music: %s", exc)
+
+
+def _load_ytm_lang() -> None:
+    lang = get_config().get("ytmLang")
+    if lang in ("en", "es"):
+        _ytm_health["lang"] = lang
 
 
 def ytm_usable() -> bool:
@@ -193,6 +211,7 @@ def normalize(item: dict) -> dict | None:
     if not video_id:
         return None
     artists = ", ".join(a["name"] for a in item.get("artists") or [] if a.get("name"))
+    artist_id = next((a.get("id") for a in item.get("artists") or [] if a.get("id")), None)
     album = item.get("album")
     album_name = album.get("name") if isinstance(album, dict) else ""
     duration = item.get("duration_seconds") or _parse_duration(
@@ -205,6 +224,7 @@ def normalize(item: dict) -> dict | None:
         "album": album_name or "",
         "duration": int(duration or 0),
         "thumb": _thumb(item.get("thumbnails") or item.get("thumbnail")),
+        **({"artistId": artist_id} if artist_id else {}),
     }
 
 
@@ -220,6 +240,9 @@ def clean_track(track: dict) -> dict:
     }
     if track.get("local"):
         out["local"] = Path(str(track["local"])).name
+    artist_id = str(track.get("artistId") or "")
+    if re.fullmatch(r"UC[\w-]{22}", artist_id):
+        out["artistId"] = artist_id
     return out
 
 
@@ -232,16 +255,18 @@ def _search_ytmusic(query: str, kind: str) -> list[dict]:
         return []
     filt = "videos" if kind == "videos" else "songs"
     results = [t for t in (normalize(r) for r in ytmusic().search(query, filter=filt, limit=30)) if t]
-    if not results and _ytm_health["lang"] == "es" and not _ytm_health["tried_en"]:
-        # Puede ser un problema de idioma al interpretar la respuesta: se prueba una vez en inglés
-        _ytm_health["tried_en"] = True
-        en = _new_ytmusic("en")
-        results = [t for t in (normalize(r) for r in en.search(query, filter=filt, limit=30)) if t]
+    if not results and not _ytm_health["tried_other"]:
+        # Puede ser un problema de idioma al interpretar la respuesta: se prueba una vez con el otro
+        _ytm_health["tried_other"] = True
+        other_lang = "es" if _ytm_health["lang"] == "en" else "en"
+        other = _new_ytmusic(other_lang)
+        results = [t for t in (normalize(r) for r in other.search(query, filter=filt, limit=30)) if t]
         if results:
-            log.info("YouTube Music funciona en inglés y no en español: cambio el idioma")
+            log.info("YouTube Music funciona en '%s' y no en '%s': cambio el idioma", other_lang, _ytm_health["lang"])
             with _ytm_lock:
-                _ytm_health["lang"] = "en"
-                _ytm = en
+                _ytm_health["lang"] = other_lang
+                _ytm = other
+            _save_ytm_lang(other_lang)
     _ytm_record(results, query)
     return results
 
@@ -313,6 +338,8 @@ def classify_entry(entry: dict) -> dict | None:
     if not track:
         return None
     track["kind"] = "video"
+    if re.fullmatch(r"UC[\w-]{22}", str(entry.get("channel_id") or "")):
+        track["artistId"] = entry["channel_id"]
     if entry.get("live_status") in ("is_live", "is_upcoming"):
         track["live"] = entry["live_status"]
     if "/shorts/" in url:
@@ -358,7 +385,146 @@ def collection(kind: str, cid: str, page: int = 1) -> dict:
             "tracks": tracks, "hasMore": len(entries) >= COLLECTION_PAGE}
 
 
+# ---------------------------------------------------------------- artistas y discografía
+
+_artist_cache: dict[str, tuple[float, dict]] = {}
+ARTIST_TTL = 30 * 60
+
+
+def _count_text(text) -> str:
+    return str(text or "").split(" ")[0]
+
+
+def search_artists(query: str) -> list[dict]:
+    """Artistas de YouTube Music; si no responde, canales de YouTube (pueden tener página de artista)."""
+    out = []
+    if ytm_usable():
+        try:
+            for r in ytmusic().search(query, filter="artists", limit=20):
+                cid = r.get("browseId")
+                if r.get("resultType", "artist") != "artist" or not re.fullmatch(r"UC[\w-]{22}", str(cid or "")):
+                    continue
+                out.append({"kind": "artist", "id": cid, "title": r.get("artist") or r.get("title") or "",
+                            "subscribers": _count_text(r.get("subscribers")),
+                            "thumb": _thumb(r.get("thumbnails"), 226)})
+        except Exception as exc:
+            log.warning("Búsqueda de artistas en YouTube Music falló: %s", exc)
+    if out:
+        return out
+    channels = [r for r in search_youtube_all(query) if r["kind"] == "channel"]
+    return [{**c, "kind": "artist", "fromYouTube": True} for c in channels]
+
+
+def _release(r: dict, section: str, rank: int) -> dict | None:
+    bid = r.get("browseId")
+    if not bid:
+        return None
+    rtype = str(r.get("type") or "").lower()
+    if "single" in rtype:
+        kind = "single"
+    elif rtype == "ep":
+        kind = "ep"
+    elif section == "singles":
+        kind = "single"
+    else:
+        kind = "album"
+    year = str(r.get("year") or "")
+    return {"id": bid, "title": r.get("title") or "", "kind": kind,
+            "year": int(year) if year.isdigit() else None,
+            "thumb": _thumb(r.get("thumbnails"), 300), "rank": rank,
+            "playlistId": r.get("audioPlaylistId") or r.get("playlistId")}
+
+
+def _get_artist_raw(cid: str) -> dict:
+    cached = _artist_cache.get(cid)
+    if cached and time.time() - cached[0] < ARTIST_TTL:
+        return cached[1]
+    try:
+        raw = ytmusic().get_artist(cid)
+    except Exception as exc:
+        log.warning("get_artist(%s) falló: %s", cid, exc)
+        if "No se pudo conectar" in _friendly_error(exc):
+            raise
+        raise ValueError("Este canal no tiene página de artista en YouTube Music.") from exc
+    _artist_cache[cid] = (time.time(), raw)
+    return raw
+
+
+def _artist_sections(raw: dict, order: str | None = None) -> list[dict]:
+    releases, seen = [], set()
+    for section in ("albums", "singles"):
+        sec = raw.get(section) or {}
+        items = sec.get("results") or []
+        if sec.get("browseId") and sec.get("params"):
+            try:
+                items = ytmusic().get_artist_albums(sec["browseId"], sec["params"], limit=None, order=order)
+            except Exception as exc:  # se queda con lo que mostró la página del artista
+                log.warning("Discografía completa (%s) no disponible: %s", section, exc)
+        for i, r in enumerate(items):
+            rel = _release(r, section, i)
+            if rel and rel["id"] not in seen:
+                seen.add(rel["id"])
+                releases.append(rel)
+    return releases
+
+
+def artist_page(cid: str) -> dict:
+    if not re.fullmatch(r"UC[\w-]{22}", cid):
+        raise ValueError("Artista inválido")
+    raw = _get_artist_raw(cid)
+    songs = raw.get("songs") or {}
+    top = [t for t in (normalize(s) for s in songs.get("results") or []) if t]
+    songs_list = str(songs.get("browseId") or "")
+    if songs_list.startswith("VL"):
+        songs_list = songs_list[2:]
+    return {
+        "id": cid,
+        "name": raw.get("name") or "",
+        "thumb": _thumb(raw.get("thumbnails"), 544),
+        "subscribers": _count_text(raw.get("subscribers")),
+        "description": (raw.get("description") or "")[:600],
+        "topSongs": top,
+        "songsPlaylist": songs_list if re.fullmatch(r"[\w-]{2,64}", songs_list) else None,
+        "releases": _artist_sections(raw),
+    }
+
+
+def artist_order(cid: str, order: str) -> list[str]:
+    """Ids de los lanzamientos en el orden que pide YouTube Music (por ahora: popularidad)."""
+    if not re.fullmatch(r"UC[\w-]{22}", cid):
+        raise ValueError("Artista inválido")
+    if order != "popularity":
+        raise ValueError("Orden inválido")
+    return [r["id"] for r in _artist_sections(_get_artist_raw(cid), order="Popularity")]
+
+
+def album_page(bid: str) -> dict:
+    if not re.fullmatch(r"MPRE[\w-]{5,60}", bid):
+        raise ValueError("Álbum inválido")
+    a = ytmusic().get_album(bid)
+    title = a.get("title") or ""
+    thumb = _thumb(a.get("thumbnails"), 544)
+    artist = ", ".join(x.get("name", "") for x in a.get("artists") or [] if x.get("name"))
+    tracks = []
+    for t in a.get("tracks") or []:
+        if not t.get("videoId") or t.get("isAvailable") is False:
+            continue
+        track = normalize(t)
+        if track:
+            track["album"] = title
+            track["thumb"] = track["thumb"] or (_thumb(a.get("thumbnails"), 226))
+            track["artist"] = track["artist"] or artist
+            tracks.append(track)
+    year = str(a.get("year") or "")
+    return {"kind": "album", "id": bid, "title": title, "artist": artist,
+            "artistId": next((x.get("id") for x in a.get("artists") or [] if x.get("id")), None),
+            "type": a.get("type") or "", "year": int(year) if year.isdigit() else None,
+            "thumb": thumb, "tracks": tracks, "hasMore": False}
+
+
 def search(query: str, kind: str, page: int = 1) -> list[dict]:
+    if kind == "artists":
+        return search_artists(query)
     if kind != "songs":  # "youtube" (y el viejo "videos"): búsqueda de YouTube tal cual
         return search_youtube_all(query, page)
     global _ytm
@@ -1050,6 +1216,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(search(text, q("type", "youtube"), page))
         if method == "GET" and parts == ["suggest"]:
             return self._json(suggestions(q("q").strip()) if q("q").strip() else [])
+        if method == "GET" and parts == ["artist"]:
+            return self._json(artist_page(q("id")))
+        if method == "GET" and parts == ["artist", "order"]:
+            return self._json(artist_order(q("id"), q("order")))
+        if method == "GET" and parts == ["album"]:
+            return self._json(album_page(q("id")))
         if method == "GET" and parts == ["collection"]:
             page = max(1, min(100, int(q("page", "1") or 1)))
             return self._json(collection(q("kind"), q("id"), page))
@@ -1396,6 +1568,7 @@ def main() -> None:
         log.error("El puerto %s está ocupado por otro programa", PORT)
         sys.exit(EXIT_PORT_BUSY)
     server.daemon_threads = True
+    _load_ytm_lang()
     status = library_status()
     log.info("Inicio (%s). Python %s, yt-dlp %s, ytmusicapi %s, mutagen %s",
              "segundo plano" if background else "consola",

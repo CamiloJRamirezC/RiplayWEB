@@ -57,6 +57,11 @@ conecta sola cuando el servicio vuelve. Firefox no permite instalar páginas com
   - Las transmisiones **en vivo** aparecen marcadas pero no se pueden reproducir ni descargar.
   - **YouTube Music** busca solo canciones; si YouTube Music no responde, muestra videos de
     YouTube para lo mismo que escribiste.
+  - **Artistas** busca artistas. **Ver artista** muestra sus canciones **Populares** y toda la
+    **Discografía**: álbumes, EP y singles, con filtros (Todo / Álbumes / Singles y EP) y orden por
+    **año** (más nuevos o más viejos), **relevancia** (la popularidad de YouTube Music) o **Tus me
+    gusta** (primero los discos con más canciones tuyas en Favoritos). Cada disco se abre con sus
+    canciones. También podés llegar desde el menú ⋯ de una canción → **Ir al artista**.
 - **Reproducir:** clic en el título. "Reproducir todo" carga la lista entera en la cola.
 - **Menú ⋯ de cada canción:** reproducir a continuación, agregar a la cola, iniciar radio
   (canciones parecidas), descargar y agregar a una lista.
