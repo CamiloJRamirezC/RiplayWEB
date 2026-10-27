@@ -554,6 +554,11 @@ def suggestions(query: str) -> list[str]:
 
 
 def radio(video_id: str) -> list[dict]:
+    disliked = {track_key(t) for t in load_dislikes()}
+    return [t for t in _radio(video_id) if track_key(t) not in disliked]
+
+
+def _radio(video_id: str) -> list[dict]:
     try:
         data = ytmusic().get_watch_playlist(videoId=video_id, limit=30)
         tracks = [normalize(t) for t in data.get("tracks") or []]
@@ -573,25 +578,44 @@ _streams: dict[str, dict] = {}
 _streams_lock = threading.Lock()
 
 
-def resolve_stream(video_id: str, force: bool = False) -> dict:
+# Solo imagen (el sonido sigue saliendo del audio, con el ecualizador). Hasta 720p, en formatos que
+# Chrome/Edge reproducen; se prefiere H.264 porque es el más liviano de decodificar.
+VIDEO_FORMATS = {
+    # el navegador avisa qué puede reproducir; se pide ese formato primero
+    "avc1": "bestvideo[height<=720][vcodec^=avc1]/bestvideo[height<=720][vcodec^=vp9]/bestvideo[height<=720][vcodec^=vp09]",
+    "vp9": "bestvideo[height<=720][vcodec^=vp9]/bestvideo[height<=720][vcodec^=vp09]/bestvideo[height<=720][vcodec^=av01]",
+    "av01": "bestvideo[height<=720][vcodec^=av01]/bestvideo[height<=720][vcodec^=vp9]/bestvideo[height<=720][vcodec^=vp09]",
+}
+
+
+def resolve_stream(video_id: str, force: bool = False, kind: str = "audio", codec: str = "avc1") -> dict:
+    codec = codec if codec in VIDEO_FORMATS else "avc1"
+    cache_key = video_id if kind == "audio" else f"{video_id}:video:{codec}"
     with _streams_lock:
-        cached = _streams.get(video_id)
+        cached = _streams.get(cache_key)
         if cached and not force and cached["expires"] > time.time() + 120:
             return cached
-    with youtube_dl({"format": AUDIO_FORMAT}) as ydl:
+    fmt = AUDIO_FORMAT if kind == "audio" else VIDEO_FORMATS[codec]
+    with youtube_dl({"format": fmt}) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
     url = info["url"]
     query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
     expires = int(query.get("expire", [0])[0] or 0) or int(time.time()) + 3 * 3600
-    ext = info.get("ext") or "m4a"
+    ext = info.get("ext") or ("m4a" if kind == "audio" else "mp4")
+    if kind == "audio":
+        mime = "audio/mp4" if ext in ("m4a", "mp4") else f"audio/{ext}"
+    else:
+        if (info.get("vcodec") or "none") == "none":
+            raise ValueError("Este video no tiene imagen")
+        mime = "video/mp4" if ext == "mp4" else f"video/{ext}"
     entry = {
         "url": url,
         "headers": dict(info.get("http_headers") or {}),
-        "mime": "audio/mp4" if ext in ("m4a", "mp4") else f"audio/{ext}",
+        "mime": mime,
         "expires": expires,
     }
     with _streams_lock:
-        _streams[video_id] = entry
+        _streams[cache_key] = entry
     return entry
 
 
@@ -936,6 +960,7 @@ def like_track(track: dict) -> dict:
     key = track_key(track)
     if not key:
         raise ValueError("No se puede marcar esta canción")
+    undislike(key)
     with _file_lock:
         playlists = load_playlists()
         fav = _favorites(playlists, create=True)
@@ -1072,6 +1097,217 @@ def start_import(body: dict) -> dict:
         _imports[job_id] = {"id": job_id, "stage": "queued", "done": 0, "total": 0, "found": 0, "missingCount": 0}
     threading.Thread(target=_run_import, args=(job_id, parsed, str(body.get("name") or "").strip() or None), daemon=True).start()
     return _imports[job_id]
+
+
+# ---------------------------------------------------------------- historial
+
+HISTORY_MAX = 3000
+
+
+def load_history(limit: int = 500) -> list[dict]:
+    items = _read_json("history.json", [])
+    return list(reversed(items))[: max(1, min(limit, HISTORY_MAX))]
+
+
+def add_history(track: dict) -> dict:
+    track = clean_track(track)
+    if not track_key(track):
+        raise ValueError("Canción inválida")
+    entry = {"at": round(time.time(), 3), "track": track}
+    with _file_lock:
+        items = _read_json("history.json", [])
+        last = items[-1] if items else None
+        # La misma canción registrada hace instantes (por ejemplo, recargar la página) no se repite
+        if last and track_key(last["track"]) == track_key(track) and entry["at"] - last["at"] < 90:
+            return last
+        items.append(entry)
+        _write_json("history.json", items[-HISTORY_MAX:])
+    return entry
+
+
+def clear_history(at: str = "") -> dict:
+    with _file_lock:
+        items = _read_json("history.json", [])
+        if at:
+            try:
+                stamp = float(at)
+            except ValueError:
+                raise ValueError("Fecha inválida")
+            items = [e for e in items if abs(e["at"] - stamp) > 0.0005]
+        else:
+            items = []
+        _write_json("history.json", items)
+    return {"ok": True, "count": len(items)}
+
+
+# ---------------------------------------------------------------- no me gusta
+
+
+def load_dislikes() -> list[dict]:
+    return _read_json("dislikes.json", [])
+
+
+def dislike_track(track: dict) -> list[dict]:
+    track = clean_track(track)
+    key = track_key(track)
+    if not key:
+        raise ValueError("No se puede marcar esta canción")
+    unlike_track(key)  # si estaba en Favoritos, sale
+    with _file_lock:
+        items = _read_json("dislikes.json", [])
+        if all(track_key(t) != key for t in items):
+            items.insert(0, track)
+            _write_json("dislikes.json", items[:5000])
+        return items
+
+
+def undislike(key: str) -> list[dict]:
+    if not key:
+        raise ValueError("Falta la canción")
+    with _file_lock:
+        items = _read_json("dislikes.json", [])
+        new = [t for t in items if track_key(t) != key]
+        if len(new) != len(items):
+            _write_json("dislikes.json", new)
+        return new
+
+
+# ---------------------------------------------------------------- letras
+
+LRCLIB = "https://lrclib.net/api"
+LYRICS_UA = "RiPlayWeb/1.0 (https://github.com/CamiloJRamirezC/RiplayWEB)"
+_LRC_TAG = re.compile(r"\[(\d{1,3}):(\d{1,2}(?:[.:]\d{1,3})?)\]")
+_TITLE_NOISE = re.compile(
+    r"\s*[\(\[][^\)\]]*(official|oficial|video|vídeo|audio|lyric|letra|visualizer|hd|4k|remaster|mv|en vivo|live)[^\)\]]*[\)\]]",
+    re.I)
+
+
+def parse_lrc(text: str) -> list[list]:
+    lines = []
+    for raw in (text or "").splitlines():
+        tags = _LRC_TAG.findall(raw)
+        if not tags:
+            continue
+        words = _LRC_TAG.sub("", raw).strip()
+        for mm, ss in tags:
+            lines.append([round(int(mm) * 60 + float(ss.replace(":", ".")), 2), words])
+    lines.sort(key=lambda x: x[0])
+    return lines
+
+
+def lyrics_query(track: dict) -> tuple[str, str]:
+    """Artista y título limpios. En videos de YouTube suele venir 'Artista - Título (Official Video)'."""
+    title = str(track.get("title") or "")
+    artist = str(track.get("artist") or "")
+    artist = re.sub(r"\s*-\s*Topic$|VEVO$|\s+Official$", "", artist.split(",")[0], flags=re.I).strip()
+    if " - " in title:
+        left, right = title.split(" - ", 1)
+        if not artist or spi.norm(left) == spi.norm(artist) or spi.norm(artist) in spi.norm(left) or not track.get("album"):
+            artist, title = left.strip(), right
+    title = spi.clean_title(_TITLE_NOISE.sub("", title)).strip(" -–|")
+    title = re.sub(r"\s*(ft\.?|feat\.?)\s.*$", "", title, flags=re.I).strip()
+    return artist, title
+
+
+def _lrclib(path: str, params: dict):
+    params = {k: v for k, v in params.items() if v not in (None, "", 0)}
+    url = f"{LRCLIB}{path}?{urllib.parse.urlencode(params)}"
+    req = urllib.request.Request(url, headers={"User-Agent": LYRICS_UA})
+    try:
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code in (400, 404):
+            return None
+        raise
+
+
+def _from_lrclib(item: dict | None) -> dict | None:
+    if not item:
+        return None
+    synced = parse_lrc(item.get("syncedLyrics") or "")
+    plain = (item.get("plainLyrics") or "").strip()
+    if not synced and not plain and not item.get("instrumental"):
+        return None
+    return {"synced": synced or None, "plain": plain or None, "instrumental": bool(item.get("instrumental")),
+            "source": "LRCLIB"}
+
+
+def _search_lrclib(artist: str, title: str, duration: int) -> dict | None:
+    best, best_score = None, -1.0
+    for params in ({"track_name": title, "artist_name": artist}, {"q": f"{artist} {title}".strip()}):
+        results = _lrclib("/search", params) or []
+        for r in results[:15]:
+            if not (r.get("syncedLyrics") or r.get("plainLyrics")):
+                continue
+            score = spi.score({"title": title, "artists": [artist] if artist else [], "duration": duration},
+                              {"title": r.get("trackName") or "", "artist": r.get("artistName") or "",
+                               "duration": int(r.get("duration") or 0)})
+            score += 0.15 if r.get("syncedLyrics") else 0
+            if score > best_score:
+                best, best_score = r, score
+        if best_score >= spi.THRESHOLD + 0.15:
+            break
+    return best if best_score >= spi.THRESHOLD else None
+
+
+def _from_ytmusic(video_id: str) -> dict | None:
+    if not video_id or not ytm_usable():
+        return None
+    try:
+        wp = ytmusic().get_watch_playlist(videoId=video_id, limit=1)
+        browse = wp.get("lyrics")
+        if not browse:
+            return None
+        data = ytmusic().get_lyrics(browse, timestamps=True)
+    except Exception as exc:
+        log.info("Letras de YouTube Music no disponibles para %s: %s", video_id, exc)
+        return None
+    if not data or not data.get("lyrics"):
+        return None
+    source = str(data.get("source") or "YouTube Music").replace("Source: ", "")
+    if data.get("hasTimestamps"):
+        synced = [[round(line.start_time / 1000, 2), line.text] for line in data["lyrics"]]
+        return {"synced": synced, "plain": None, "instrumental": False, "source": source}
+    return {"synced": None, "plain": str(data["lyrics"]).strip(), "instrumental": False, "source": source}
+
+
+def get_lyrics(track: dict) -> dict:
+    vid = str(track.get("id") or "")
+    artist, title = lyrics_query(track)
+    if not title:
+        raise ValueError("Falta el título de la canción")
+    cache_key = vid if re.fullmatch(r"[\w-]{6,20}", vid) else "t_" + re.sub(r"[^\w-]+", "_", f"{artist}_{title}")[:120]
+    cache_file = DATA_DIR / "lyrics" / f"{cache_key}.json"
+    try:
+        cached = json.loads(cache_file.read_text(encoding="utf-8"))
+        if cached.get("found") or time.time() - cached.get("checked", 0) < 24 * 3600:
+            return cached
+    except (OSError, ValueError):
+        pass
+    duration = int(track.get("duration") or 0)
+    result = None
+    try:
+        result = _from_lrclib(_lrclib("/get", {"track_name": title, "artist_name": artist,
+                                               "album_name": track.get("album"), "duration": duration}))
+        if not result or not result.get("synced"):
+            searched = _from_lrclib(_search_lrclib(artist, title, duration))
+            if searched and (not result or searched.get("synced")):
+                result = searched
+    except Exception as exc:
+        log.warning("LRCLIB no respondió (%s)", exc)
+    if not result or not result.get("synced"):
+        yt = _from_ytmusic(vid)
+        if yt and (not result or yt.get("synced")):
+            result = yt
+    out = {"found": bool(result), "artist": artist, "title": title, "checked": time.time(),
+           **(result or {"synced": None, "plain": None, "instrumental": False, "source": None})}
+    try:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+    return out
 
 
 # ---------------------------------------------------------------- errores
@@ -1229,6 +1465,29 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(radio(parts[1]))
         if method == "GET" and len(parts) == 2 and parts[0] == "stream":
             return self._stream(parts[1])
+        if method == "GET" and len(parts) == 2 and parts[0] == "video":
+            return self._stream(parts[1], kind="video", codec=q("codec", "avc1"))
+
+        if parts == ["lyrics"] and method == "GET":
+            track = {k: q(k) for k in ("id", "title", "artist", "album")}
+            track["duration"] = int(q("duration", "0") or 0)
+            return self._json(get_lyrics(track))
+
+        if parts == ["history"]:
+            if method == "GET":
+                return self._json(load_history(int(q("limit", "500") or 500)))
+            if method == "POST":
+                return self._json(add_history(self._body().get("track") or {}))
+            if method == "DELETE":
+                return self._json(clear_history(q("at")))
+
+        if parts == ["dislikes"]:
+            if method == "GET":
+                return self._json(load_dislikes())
+            if method == "POST":
+                return self._json(dislike_track(self._body().get("track") or {}))
+            if method == "DELETE":
+                return self._json(undislike(q("key").strip()))
 
         if parts == ["downloads"]:
             if method == "GET":
@@ -1357,7 +1616,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._error("No encontrado", 404)
 
     # -- audio
-    def _stream(self, video_id: str) -> None:
+    def _stream(self, video_id: str, kind: str = "audio", codec: str = "avc1") -> None:
         _activity["playback"] = time.time()
         if not re.fullmatch(r"[\w-]{6,20}", video_id):
             return self._error("Identificador inválido")
@@ -1366,7 +1625,7 @@ class Handler(BaseHTTPRequestHandler):
         wanted_end = rng[1] if rng else None
 
         for attempt in range(2):
-            entry = resolve_stream(video_id, force=attempt > 0)
+            entry = resolve_stream(video_id, force=attempt > 0, kind=kind, codec=codec)
             end = start + STREAM_CHUNK - 1
             if wanted_end is not None:
                 end = min(end, wanted_end)

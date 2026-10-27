@@ -39,6 +39,10 @@
     <symbol id="i-heart" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.4C19.5 15.4 12 20 12 20z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
     <symbol id="i-heart-fill" viewBox="0 0 24 24"><path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.4a4.3 4.3 0 0 1 7.5 2.4C19.5 15.4 12 20 12 20z" fill="currentColor" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
     <symbol id="i-artist" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M4.5 20c.8-3.8 3.8-6 7.5-6s6.7 2.2 7.5 6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
+    <symbol id="i-dislike" viewBox="0 0 24 24"><path d="M10 15v4.2a2 2 0 0 0 2 2l3.5-7.7V3.5H7.6a2 2 0 0 0-2 1.7L4.3 12.6a2 2 0 0 0 2 2.4zM15.5 3.5H19a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-dislike-fill" viewBox="0 0 24 24"><path d="M10 15v4.2a2 2 0 0 0 2 2l3.5-7.7V3.5H7.6a2 2 0 0 0-2 1.7L4.3 12.6a2 2 0 0 0 2 2.4zM15.5 3.5H19a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5h-3.5" fill="currentColor" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></symbol>
+    <symbol id="i-lyrics" viewBox="0 0 24 24"><path d="M4 6.5h11M4 11h11M4 15.5h6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><circle cx="16.5" cy="17" r="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.1 17V7.5l2.4.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4.5v3.4h3.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8v4.3l2.8 1.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-radio" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.2" fill="currentColor"/><path d="M8 8a5.6 5.6 0 0 0 0 8M16 8a5.6 5.6 0 0 1 0 8M5.2 5.2a9.6 9.6 0 0 0 0 13.6M18.8 5.2a9.6 9.6 0 0 1 0 13.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
   </svg>
 
@@ -47,6 +51,7 @@
       <div class="brand">RiPlay</div>
       <button class="nav-item" data-view="search"><svg><use href="#i-search"/></svg><span>Buscar</span></button>
       <button class="nav-item" data-view="local"><svg><use href="#i-disk"/></svg><span>En el disco</span><b class="nav-badge" id="dl-badge" hidden></b></button>
+      <button class="nav-item" data-view="history"><svg><use href="#i-history"/></svg><span>Historial</span></button>
       <div class="side-head"><span>Listas</span></div>
       <button class="nav-item nav-action" id="new-playlist"><svg><use href="#i-plus"/></svg><span>Nueva lista</span></button>
       <button class="nav-item nav-action" id="import-spotify"><svg><use href="#i-import"/></svg><span>Importar de Spotify</span><b class="nav-badge" id="import-badge" hidden></b></button>
@@ -71,12 +76,13 @@
     <input type="range" id="seek" class="seek" min="0" max="1000" value="0" step="1" aria-label="Posición" disabled>
     <div class="player-row">
       <div class="now">
-        <img id="now-cover" class="cover" alt="" hidden>
+        <img id="now-cover" class="cover now-open" alt="" hidden title="Ver portada y letra">
         <div class="now-text">
           <div id="now-title" class="now-title">Nada sonando</div>
           <div id="now-artist" class="now-artist">Elegí una canción para empezar</div>
         </div>
         <button class="icon-btn like-btn" id="btn-like" aria-pressed="false" title="Me gusta" aria-label="Agregar a Favoritos" hidden><svg><use href="#i-heart"/></svg></button>
+        <button class="icon-btn dislike-btn" id="btn-dislike" aria-pressed="false" title="No me gusta" aria-label="No me gusta" hidden><svg><use href="#i-dislike"/></svg></button>
       </div>
       <div class="controls">
         <button class="icon-btn" id="btn-shuffle" title="Mezclar la cola" aria-label="Mezclar la cola"><svg><use href="#i-shuffle"/></svg></button>
@@ -90,6 +96,7 @@
         <button class="icon-btn" id="btn-mute" aria-label="Silenciar"><svg><use href="#i-volume"/></svg></button>
         <input type="range" id="volume" class="volume" min="0" max="1" step="0.01" value="1" aria-label="Volumen">
         <button class="icon-btn" id="btn-dl-current" title="Descargar esta canción" aria-label="Descargar esta canción" disabled><svg><use href="#i-download"/></svg></button>
+        <button class="icon-btn" id="btn-np" title="Portada, video y letra" aria-label="Ver portada, video y letra" aria-expanded="false" aria-controls="np-panel"><svg><use href="#i-lyrics"/></svg></button>
         <button class="icon-btn" id="btn-eq" title="Ecualizador" aria-label="Ecualizador" aria-expanded="false" aria-controls="eq-panel"><svg><use href="#i-eq"/></svg></button>
         <button class="icon-btn" id="btn-queue" title="Cola" aria-label="Mostrar cola"><svg><use href="#i-queue"/></svg></button>
       </div>
@@ -170,5 +177,6 @@
   <audio id="audio" preload="auto"></audio>
   <script src="/app.js"></script>
   <script src="/eq.js"></script>
+  <script src="/nowplaying.js"></script>
 </body>
 </html>

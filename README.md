@@ -69,6 +69,18 @@ conecta sola cuando el servicio vuelve. Firefox no permite instalar páginas com
   aparece primera en la barra lateral, con las últimas que te gustaron arriba. Tocarlo de nuevo la
   quita. Si ya tenías una lista llamada "Favoritos", usa esa. Una canción descargada cuenta como la
   misma que su versión online.
+- **No me gusta:** el pulgar abajo del reproductor (o el menú ⋯ → **No me gusta**). Esa canción se
+  saltea sola al pasar de canción y no aparece en la radio; si la elegís a propósito, suena igual.
+  Si sonaba, pasa a la siguiente. Darle me gusta lo deshace.
+- **Reproduciendo:** tocá la portada o el título en el reproductor (o el botón de la letra) para ver
+  la **portada grande** y la **letra sincronizada**: la línea que suena se resalta, tocar una
+  línea salta a esa parte y **−0,5 s / +0,5 s** corrige si la letra va adelantada o atrasada.
+  - **Ver video:** si es un video de YouTube, podés ver el video en lugar de la portada. El sonido
+    sigue saliendo igual (con el ecualizador); el video solo acompaña. La opción se recuerda.
+  - Las letras salen de LRCLIB (gratis, sin cuenta) o, si no está, de YouTube Music.
+- **Historial:** en la barra lateral. Lo que escuchaste (al menos 30 segundos), agrupado por día y
+  con la hora. Se puede quitar una entrada o borrar todo. La pestaña **No me gusta** muestra las que
+  marcaste, para deshacerlo.
 - **Listas:** en la barra lateral, **Nueva lista** crea una vacía. También desde el menú ⋯ de
   cualquier canción → "Nueva lista…" (la crea con esa canción adentro).
 - **Importar de Spotify:** pegá el enlace de una playlist o álbum (en Spotify: ⋯ → Compartir →
@@ -99,7 +111,7 @@ conecta sola cuando el servicio vuelve. Firefox no permite instalar páginas com
   "En el disco" → "Cambiar carpeta"). Se guardan en `.m4a` con título, artista, álbum y portada,
   así que cualquier otro reproductor las reconoce.
 - **Listas y configuración:** carpeta `RiPlayWeb` en tu usuario (`playlists.json`, `config.json`,
-  `eq.json`).
+  `eq.json`, `history.json`, `dislikes.json`; las letras ya buscadas en `lyrics/`).
   Copiá esa carpeta para tener un respaldo.
 
 ## Si algo falla

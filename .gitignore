@@ -8,5 +8,8 @@ config.json
 playlists.json
 downloads.json
 eq.json
+history.json
+dislikes.json
+lyrics/
 riplay.log*
 *.tmp

@@ -69,6 +69,9 @@ function toast(msg) {
 
 const state = {
   view: ["col", "artist"].includes(store.get("view", "search")) ? "search" : store.get("view", "search"),
+  dislikes: [],
+  history: null,
+  historyTab: "played",
   query: store.get("query", ""),
   type: ["songs", "artists"].includes(store.get("type", "youtube")) ? store.get("type", "youtube") : "youtube",
   results: [],
@@ -138,6 +141,7 @@ function render() {
 function renderView(main) {
   if (state.view === "search") main.replaceChildren(renderSearch());
   else if (state.view === "local") main.replaceChildren(renderLocal());
+  else if (state.view === "history") main.replaceChildren(renderHistory());
   else if (state.view === "artist") {
     if (!state.artist) { state.view = "search"; return renderView(main); }
     main.replaceChildren(renderArtist());
@@ -225,9 +229,12 @@ async function toggleLike(t, btn) {
       ? await api("likes?key=" + encodeURIComponent(likeKey(t)), { method: "DELETE" })
       : await api("likes", { method: "POST", body: { track: t } });
     setFavorites(pl);
+    const wasDisliked = !liked && isDisliked(t);
+    if (wasDisliked) state.dislikes = state.dislikes.filter((x) => likeKey(x) !== likeKey(t));
     toast(liked ? "Quitada de Favoritos" : "Agregada a Favoritos");
+    updateDislikeCurrent();
     const fav = favoritesPl();
-    if (fav && state.view === "pl:" + fav.id) render(); else { renderNav(); refreshLikeButtons(); }
+    if (wasDisliked || (fav && state.view === "pl:" + fav.id)) render(); else { renderNav(); refreshLikeButtons(); }
     updateLikeCurrent();
   } catch (err) { toast(err.message); }
   likeBusy = false;
@@ -273,9 +280,12 @@ function trackRow(t, list, i, ctx = {}) {
   const play = () => (list && isPlayable(t)
     ? playList(list, i)
     : toast(t.live === "is_upcoming" ? "Esta transmisión todavía no empezó." : "Las transmisiones en vivo no se pueden reproducir en RiPlay."));
-  const tag = t.live ? el("span", { class: "tag tag-live", text: LIVE_LABEL[t.live] }) : t.short ? el("span", { class: "tag", text: "Short" }) : null;
+  const disliked = isDisliked(t);
+  const tag = t.live ? el("span", { class: "tag tag-live", text: LIVE_LABEL[t.live] })
+    : disliked ? el("span", { class: "tag tag-dislike", title: "No te gusta: se saltea al pasar de canción" }, icon("dislike-fill"), "No te gusta")
+    : t.short ? el("span", { class: "tag", text: "Short" }) : null;
   const row = el("li", {
-    class: "track" + (playing ? " playing" : "") + (isPlayable(t) ? "" : " not-playable"),
+    class: "track" + (playing ? " playing" : "") + (isPlayable(t) ? "" : " not-playable") + (disliked ? " disliked" : ""),
     ondblclick: play,
   },
     coverImg(t),
@@ -284,7 +294,7 @@ function trackRow(t, list, i, ctx = {}) {
         el("div", { class: "track-title" }, tag, t.title || "Sin título")),
       el("div", { class: "track-artist", text: t.artist || "Artista desconocido" })),
     el("div", { class: "track-album", text: t.album || "" }),
-    el("div", { class: "track-dur", text: t.duration ? fmt(t.duration) : "" }),
+    el("div", { class: "track-dur", text: ctx.meta != null ? ctx.meta : t.duration ? fmt(t.duration) : "" }),
     el("div", { class: "track-actions" },
       likeButton(t),
       downloadButton(t),
@@ -700,6 +710,170 @@ function renderArtist() {
   return el("section", {}, head, popular, discog);
 }
 
+/* ============================================================ no me gusta */
+
+function isDisliked(t) {
+  const k = likeKey(t);
+  return !!k && state.dislikes.some((x) => likeKey(x) === k);
+}
+
+async function loadDislikes() {
+  try { state.dislikes = await api("dislikes"); } catch { /* sin datos: no se saltea nada */ }
+  updateDislikeCurrent();
+}
+
+function updateDislikeCurrent() {
+  const t = state.queue[state.index];
+  const b = $("#btn-dislike");
+  b.hidden = !t || !likeKey(t);
+  if (b.hidden) return;
+  const on = isDisliked(t);
+  b.setAttribute("aria-pressed", String(on));
+  b.title = on ? "Quitar de No me gusta" : "No me gusta";
+  b.setAttribute("aria-label", b.title);
+  b.replaceChildren(icon(on ? "dislike-fill" : "dislike"));
+}
+
+let dislikeBusy = false;
+async function toggleDislike(t) {
+  if (dislikeBusy || !likeKey(t)) return;
+  dislikeBusy = true;
+  const was = isDisliked(t);
+  try {
+    state.dislikes = was
+      ? await api("dislikes?key=" + encodeURIComponent(likeKey(t)), { method: "DELETE" })
+      : await api("dislikes", { method: "POST", body: { track: t } });
+    if (!was) {
+      const fav = favoritesPl();
+      if (fav) fav.tracks = fav.tracks.filter((x) => likeKey(x) !== likeKey(t)); // el servidor también la saca
+      const cur = state.queue[state.index];
+      if (cur && likeKey(cur) === likeKey(t)) {
+        toast("No te gusta: paso a la siguiente");
+        next();
+      } else toast(`No te gusta “${t.title}”: se va a saltear al pasar de canción`);
+    } else toast("Quitada de No me gusta");
+    render();
+    updateLikeCurrent();
+    updateDislikeCurrent();
+  } catch (err) { toast(err.message); }
+  dislikeBusy = false;
+}
+
+/* ============================================================ historial */
+
+// Cuenta como escuchada a los 30 segundos (o a la mitad, si es más corta)
+const listen = { key: null, seconds: 0, last: 0, logged: false };
+
+function resetListen() {
+  const t = state.queue[state.index];
+  listen.key = t ? likeKey(t) : null;
+  listen.seconds = 0;
+  listen.last = 0;
+  listen.logged = false;
+}
+
+audio.addEventListener("loadstart", resetListen);
+audio.addEventListener("timeupdate", () => {
+  const t = state.queue[state.index];
+  if (!t || listen.logged || audio.paused) { listen.last = audio.currentTime; return; }
+  const delta = audio.currentTime - listen.last;
+  listen.last = audio.currentTime;
+  if (delta > 0 && delta < 1.5) listen.seconds += delta; // los saltos no cuentan
+  const need = Math.min(30, (audio.duration || t.duration || 60) / 2);
+  if (listen.seconds >= need && likeKey(t) === listen.key) {
+    listen.logged = true;
+    api("history", { method: "POST", body: { track: t } })
+      .then((entry) => { if (state.history) { state.history.unshift(entry); if (state.view === "history") render(); } })
+      .catch(() => { listen.logged = false; });
+  }
+});
+
+async function loadHistory() {
+  try { state.history = await api("history?limit=1000"); } catch (err) { state.history = []; toast(err.message); }
+  if (state.view === "history") render();
+}
+
+function dayLabel(ts) {
+  const d = new Date(ts * 1000);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const that = new Date(d); that.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - that) / 86400000);
+  if (diff === 0) return "Hoy";
+  if (diff === 1) return "Ayer";
+  const text = d.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+const hourLabel = (ts) => new Date(ts * 1000).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+
+async function removeHistoryEntry(at) {
+  try {
+    await api("history?at=" + encodeURIComponent(at), { method: "DELETE" });
+    state.history = (state.history || []).filter((e) => e.at !== at);
+    render();
+  } catch (err) { toast(err.message); }
+}
+
+async function clearHistory() {
+  if (!confirm("¿Borrar todo el historial? No se puede deshacer.")) return;
+  try {
+    await api("history", { method: "DELETE" });
+    state.history = [];
+    toast("Historial borrado");
+    render();
+  } catch (err) { toast(err.message); }
+}
+
+function renderHistory() {
+  if (state.history == null) {
+    loadHistory();
+    return el("section", {}, el("div", { class: "view-head" }, el("h1", { text: "Historial" })), el("p", { class: "loading", text: "Cargando…" }));
+  }
+  const tab = (id, label) => el("button", {
+    type: "button", "aria-pressed": String(state.historyTab === id),
+    onclick: () => { state.historyTab = id; render(); },
+  }, label);
+  const tabs = el("div", { class: "segmented", role: "group", "aria-label": "Qué mostrar" },
+    tab("played", "Escuchados"), tab("disliked", `No me gusta${state.dislikes.length ? " " + state.dislikes.length : ""}`));
+
+  if (state.historyTab === "disliked") {
+    const list = state.dislikes;
+    const head = el("div", { class: "view-head" }, el("h1", { text: "Historial" }), tabs);
+    const body = list.length
+      ? el("div", {},
+          el("p", { class: "view-sub", text: "Estas canciones se saltean solas al pasar de canción y no aparecen en la radio. Si elegís una a propósito, suena igual." }),
+          el("ul", { class: "tracks" }, list.map((t, i) => trackRow(t, list, i))))
+      : el("div", { class: "empty" }, el("strong", { text: "No marcaste nada con “No me gusta”" }),
+          "Usá el pulgar abajo del reproductor o el menú ⋯ de una canción.");
+    return el("section", {}, head, body);
+  }
+
+  const items = state.history;
+  const tracks = items.map((e) => e.track);
+  const head = el("div", { class: "view-head" }, el("h1", { text: "Historial" }), tabs,
+    items.length ? el("div", { class: "toolbar" },
+      el("button", { class: "btn primary", onclick: () => {
+        const seen = new Set();
+        const unique = tracks.filter((t) => { const k = likeKey(t); if (seen.has(k)) return false; seen.add(k); return true; });
+        playList(unique, 0);
+      } }, icon("play"), "Reproducir"),
+      el("button", { class: "btn danger", onclick: clearHistory }, "Borrar historial")) : null);
+  if (!items.length) {
+    return el("section", {}, head, el("div", { class: "empty" }, el("strong", { text: "Todavía no escuchaste nada" }),
+      "Cada canción que suene al menos 30 segundos va a aparecer acá, agrupada por día."));
+  }
+  const groups = [];
+  items.forEach((e, i) => {
+    const label = dayLabel(e.at);
+    if (!groups.length || groups[groups.length - 1].label !== label) groups.push({ label, rows: [] });
+    groups[groups.length - 1].rows.push(trackRow(e.track, tracks, i, { meta: hourLabel(e.at), historyAt: e.at }));
+  });
+  return el("section", {}, head,
+    ...groups.map((g) => el("div", { class: "history-day" },
+      el("h2", { class: "section-title", text: g.label }),
+      el("ul", { class: "tracks" }, g.rows))));
+}
+
 /* ============================================================ vista: en el disco */
 
 function renderLocal() {
@@ -1024,6 +1198,8 @@ function openTrackMenu(anchor, t, ctx) {
       { icon: "queue", text: "Agregar a la cola", action: () => enqueue(t) },
     ] : []),
   ];
+  if (likeKey(t)) items.push({ icon: isDisliked(t) ? "dislike-fill" : "dislike", text: isDisliked(t) ? "Quitar de No me gusta" : "No me gusta", action: () => toggleDislike(t) });
+  if (ctx.historyAt) items.push({ icon: "close", text: "Quitar del historial", action: () => removeHistoryEntry(ctx.historyAt) });
   if (t.id) items.push({ icon: "radio", text: "Iniciar radio", action: () => startRadio(t) });
   if (t.artistId) items.push({ icon: "artist", text: "Ir al artista", action: () => openArtist({ id: t.artistId, title: (t.artist || "").split(",")[0] }) });
   if (t.id && !t.local && !t.live) items.push({ icon: "download", text: "Descargar", action: () => download(t) });
@@ -1165,15 +1341,34 @@ function togglePlay() {
   if (audio.paused) audio.play().catch(() => {}); else audio.pause();
 }
 
+// Siguiente canción que no esté marcada con "No me gusta" (a partir de from)
+function nextAllowed(from) {
+  const skipped = [];
+  for (let j = from; j < state.queue.length; j++) {
+    if (!isDisliked(state.queue[j]) && isPlayable(state.queue[j])) return { index: j, skipped };
+    skipped.push(state.queue[j]);
+  }
+  return { index: -1, skipped };
+}
+
+function noteSkipped(skipped) {
+  if (!skipped.length) return;
+  toast(skipped.length === 1 ? `Salteada: ${skipped[0].title} (no te gusta)` : `Salteadas ${skipped.length} canciones que no te gustan`);
+}
+
 async function next(fromEnded = false) {
-  if (fromEnded && state.repeat === "one") { audio.currentTime = 0; return audio.play(); }
-  if (state.index + 1 < state.queue.length) return playIndex(state.index + 1);
-  if (state.repeat === "all" && state.queue.length) return playIndex(0);
+  if (fromEnded && state.repeat === "one" && !isDisliked(state.queue[state.index] || {})) { audio.currentTime = 0; return audio.play(); }
+  let found = nextAllowed(state.index + 1);
+  if (found.index >= 0) { noteSkipped(found.skipped); return playIndex(found.index); }
+  if (state.repeat === "all" && state.queue.length) {
+    found = nextAllowed(0);
+    if (found.index >= 0) return playIndex(found.index);
+  }
   const last = state.queue[state.index];
   if (fromEnded && state.radioAuto && last && last.id) {
     try {
       const seen = new Set(state.queue.map(key));
-      const more = (await api("radio/" + encodeURIComponent(last.id))).filter((t) => !seen.has(key(t)));
+      const more = (await api("radio/" + encodeURIComponent(last.id))).filter((t) => !seen.has(key(t)) && !isDisliked(t));
       if (more.length) { state.queue.push(...more); return playIndex(state.index + 1); }
     } catch { /* sin radio: se detiene */ }
   }
@@ -1218,6 +1413,7 @@ function updateNow() {
     cover.hidden = true;
     document.title = "RiPlay";
     updateLikeCurrent();
+    updateDislikeCurrent();
     return;
   }
   $("#now-title").textContent = t.title || "Sin título";
@@ -1226,6 +1422,7 @@ function updateNow() {
   document.title = `${t.title} — RiPlay`;
   updateDownloadCurrent();
   updateLikeCurrent();
+  updateDislikeCurrent();
   if ("mediaSession" in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: t.title || "", artist: t.artist || "", album: t.album || "",
@@ -1326,6 +1523,7 @@ $("#btn-prev").addEventListener("click", prev);
 $("#btn-shuffle").addEventListener("click", shuffleQueue);
 $("#btn-repeat").addEventListener("click", cycleRepeat);
 $("#btn-like").addEventListener("click", (e) => { const t = state.queue[state.index]; if (t) toggleLike(t, e.currentTarget); });
+$("#btn-dislike").addEventListener("click", () => { const t = state.queue[state.index]; if (t) toggleDislike(t); });
 $("#btn-dl-current").addEventListener("click", () => { const t = state.queue[state.index]; if (t) download(t); });
 $("#btn-queue").addEventListener("click", () => {
   const q = $("#queue");
@@ -1416,6 +1614,7 @@ if ("serviceWorker" in navigator) {
   render();
   await loadPlaylists();
   updateLikeCurrent();
+  loadDislikes().then(() => { if (state.dislikes.length) render(); });
   api("config").then((c) => { state.config = c; }).catch(() => {});
   api("status").then((st) => { state.status = st; if (state.view === "search") render(); }).catch(() => {});
   pollDownloads();
