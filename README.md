@@ -31,6 +31,7 @@ de íconos ocultos). Doble clic lo abre; clic derecho muestra:
 - **Abrir RiPlay** y **Abrir carpeta de descargas**.
 - **Iniciar con Windows**: viene activado, así RiPlay ya está listo cuando prendés la compu.
   Destildalo si no lo querés.
+- **Buscar actualizaciones** de RiPlay (ver abajo).
 - **Reiniciar** y **Salir** (apaga el servicio).
 
 El servicio busca actualizaciones de yt-dlp una vez por día y, si hay, se reinicia solo cuando
@@ -46,6 +47,28 @@ ventana. Desde ahí, el ícono junto al reloj abre directamente esa ventana.
 
 La app necesita el servicio funcionando. Si alguna vez está apagado, la ventana lo avisa y se
 conecta sola cuando el servicio vuelve. Firefox no permite instalar páginas como app.
+
+### Actualizar RiPlay
+
+Al pie de la barra lateral está la versión (**RiPlay · versión …**). Si en GitHub hay una versión
+más nueva aparece el aviso **Actualización**; tocalo (o el menú del ícono → **Buscar
+actualizaciones**) para ver qué cambió y tocá **Actualizar ahora**.
+
+- Descarga solo los archivos que cambiaron, verifica cada uno contra GitHub y que el código no
+  tenga errores antes de tocar nada. Si algo no cuadra, no cambia nada.
+- **Nunca toca tus datos:** listas, Favoritos, historial, ecualizador, descargas, ajustes ni
+  `.venv` quedan como estaban.
+- Guarda una copia de la versión que reemplaza (en `backups/`, las últimas 3).
+  **Volver a la versión anterior** la restaura si la nueva no te convence.
+- Con el ícono junto al reloj, RiPlay se reinicia solo y la página se recarga. En modo
+  `consola`, cerrá la ventana y abrí de nuevo `iniciar.bat`.
+- Si cambian las librerías (`requirements.txt`), las instala en el mismo paso.
+
+**Repositorio privado:** GitHub pide un token de solo lectura. En GitHub: **Settings → Developer
+settings → Personal access tokens → Fine-grained tokens → Generate new token**; en **Repository
+access** elegí solo este repositorio y en **Permissions → Contents** poné **Read-only**. Pegalo en
+**Repositorio y token de GitHub** dentro de la ventana de actualizaciones. Se guarda solo en
+`config.json` de tu compu y la página nunca lo muestra. Si el repositorio es público no hace falta.
 
 ## Cómo se usa
 
@@ -111,7 +134,8 @@ conecta sola cuando el servicio vuelve. Firefox no permite instalar páginas com
   "En el disco" → "Cambiar carpeta"). Se guardan en `.m4a` con título, artista, álbum y portada,
   así que cualquier otro reproductor las reconoce.
 - **Listas y configuración:** carpeta `RiPlayWeb` en tu usuario (`playlists.json`, `config.json`,
-  `eq.json`, `history.json`, `dislikes.json`; las letras ya buscadas en `lyrics/`).
+  `eq.json`, `history.json`, `dislikes.json`; las letras ya buscadas en `lyrics/` y las copias de
+  versiones anteriores en `backups/`).
   Copiá esa carpeta para tener un respaldo.
 
 ## Si algo falla

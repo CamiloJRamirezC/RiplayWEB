@@ -1599,7 +1599,7 @@ if ("serviceWorker" in navigator) {
   const vista = new URLSearchParams(location.search).get("vista");
   if (vista === "buscar") state.view = "search";
   if (vista === "disco") state.view = "local";
-  if (vista) history.replaceState(null, "", "/");
+  if (vista && vista !== "actualizar") history.replaceState(null, "", "/"); // "actualizar" lo maneja update.js
 }
 
 (async function init() {

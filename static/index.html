@@ -56,7 +56,12 @@
       <button class="nav-item nav-action" id="new-playlist"><svg><use href="#i-plus"/></svg><span>Nueva lista</span></button>
       <button class="nav-item nav-action" id="import-spotify"><svg><use href="#i-import"/></svg><span>Importar de Spotify</span><b class="nav-badge" id="import-badge" hidden></b></button>
       <div id="playlist-nav" class="playlist-nav"></div>
-      <button class="nav-item nav-install" id="install-app" hidden><svg><use href="#i-download"/></svg><span>Instalar RiPlay</span></button>
+      <div class="side-foot">
+        <button class="nav-item nav-install" id="install-app" hidden><svg><use href="#i-download"/></svg><span>Instalar RiPlay</span></button>
+        <button class="version-btn" id="app-version" type="button" title="Buscar actualizaciones">
+          <span id="app-version-text">RiPlay</span><b class="update-dot" id="update-dot" hidden>Actualización</b>
+        </button>
+      </div>
     </nav>
 
     <main class="main" id="main" tabindex="-1"></main>
@@ -172,11 +177,38 @@
     </form>
   </dialog>
 
+  <dialog id="upd-dialog" class="dialog" aria-labelledby="upd-title">
+    <div class="upd-body">
+      <header class="dialog-head">
+        <h2 id="upd-title">Actualizaciones</h2>
+        <button type="button" class="icon-btn" id="upd-close" aria-label="Cerrar"><svg><use href="#i-close"/></svg></button>
+      </header>
+      <div id="upd-content" aria-live="polite"></div>
+      <details class="more" id="upd-advanced">
+        <summary>Repositorio y token de GitHub</summary>
+        <form id="upd-form" class="upd-form" novalidate>
+          <label class="field"><span>Repositorio</span><input type="text" id="upd-repo" autocomplete="off" spellcheck="false" placeholder="usuario/repositorio"></label>
+          <label class="field"><span>Rama</span><input type="text" id="upd-branch" autocomplete="off" spellcheck="false" placeholder="main"></label>
+          <label class="field"><span>Token de GitHub <small id="upd-token-state"></small></span>
+            <input type="password" id="upd-token" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></label>
+          <p class="hint">Solo hace falta si el repositorio es privado. Se guarda únicamente en esta compu.
+            Para crearlo: en GitHub, <b>Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token</b>;
+            en <b>Repository access</b> elegí solo este repositorio y en <b>Permissions → Contents</b> poné <b>Read-only</b>.</p>
+          <div class="dialog-actions">
+            <button type="button" class="btn danger" id="upd-clear-token" hidden>Quitar token</button>
+            <button type="submit" class="btn primary">Guardar y buscar</button>
+          </div>
+        </form>
+      </details>
+    </div>
+  </dialog>
+
   <div id="menu" class="menu" role="menu" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <audio id="audio" preload="auto"></audio>
   <script src="/app.js"></script>
   <script src="/eq.js"></script>
   <script src="/nowplaying.js"></script>
+  <script src="/update.js"></script>
 </body>
 </html>

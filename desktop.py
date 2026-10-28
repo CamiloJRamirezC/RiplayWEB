@@ -270,7 +270,8 @@ class Tray:
     """Ícono con menú. run() bloquea el hilo principal hasta Salir o Reiniciar."""
 
     def __init__(self, *, image_path: Path, title: str, on_open, on_folder,
-                 autostart_get, autostart_set, notify_text: str | None = None):
+                 autostart_get, autostart_set, notify_text: str | None = None, on_update=None):
+        self.on_update = on_update
         self.image_path = image_path
         self.title = title
         self.on_open, self.on_folder = on_open, on_folder
@@ -306,6 +307,8 @@ class Tray:
                 checked=lambda item: self.autostart_get(),
                 visible=autostart_supported(),
             ),
+            pystray.MenuItem("Buscar actualizaciones", safe(lambda: self.on_update and self.on_update()),
+                             visible=self.on_update is not None),
             pystray.MenuItem("Reiniciar", safe(lambda: self.stop("restart"))),
             pystray.MenuItem("Salir", safe(lambda: self.stop("quit"))),
         )

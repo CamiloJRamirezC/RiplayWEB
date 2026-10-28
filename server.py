@@ -31,6 +31,7 @@ APP_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(APP_DIR))
 import spotify_import as spi  # noqa: E402
 import desktop  # noqa: E402
+import selfupdate  # noqa: E402
 STATIC_DIR = APP_DIR / "static"
 DATA_DIR = Path(os.environ.get("RIPLAY_DATA", Path.home() / "RiPlayWeb"))
 HOST = "127.0.0.1"
@@ -1310,6 +1311,146 @@ def get_lyrics(track: dict) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- actualizar desde GitHub
+
+_restart_hook = None          # en segundo plano: reinicia el servicio (lo define _run_background)
+_update_job: dict = {}
+_update_lock = threading.Lock()
+UPDATE_CHECK_TTL = 6 * 3600
+_update_failure: dict = {}
+
+
+def _update_settings() -> tuple[str, str, str | None, str | None]:
+    cfg = get_config()
+    return (cfg.get("updateRepo") or selfupdate.DEFAULT_REPO, cfg.get("updateBranch") or selfupdate.DEFAULT_BRANCH,
+            cfg.get("githubToken") or None, cfg.get("installedCommit") or None)
+
+
+def _save_config(**changes) -> dict:
+    with _file_lock:
+        cfg = get_config()
+        for k, v in changes.items():
+            if v is None:
+                cfg.pop(k, None)
+            else:
+                cfg[k] = v
+        _write_json("config.json", cfg)
+    return cfg
+
+
+def _public_update_info(extra: dict | None = None) -> dict:
+    repo, branch, token, installed = _update_settings()
+    return {"repo": repo, "branch": branch, "hasToken": bool(token), "installed": installed,
+            "installedShort": installed[:7] if installed else None,
+            "hasBackup": bool(selfupdate.list_backups(DATA_DIR)),
+            "canRestart": _restart_hook is not None, **(extra or {})}
+
+
+def update_status(refresh: bool = False) -> dict:
+    cfg = get_config()
+    cached = cfg.get("updateCheck")
+    repo, branch, token, installed = _update_settings()
+    if (not refresh and cached and time.time() - cached.get("checkedAt", 0) < UPDATE_CHECK_TTL
+            and cached.get("repo") == repo and cached.get("branch") == branch):
+        return _public_update_info({"status": cached})
+    key = (repo, branch, bool(token))
+    if not refresh and _update_failure.get("key") == key and time.time() - _update_failure.get("at", 0) < 600:
+        return _public_update_info(_update_failure["result"])  # no consultar GitHub en cada recarga si falla
+    try:
+        st = selfupdate.status(APP_DIR, repo, branch, token, installed)
+    except selfupdate.UpdateError as exc:
+        result = {"error": str(exc), "needsToken": exc.needs_token}
+        _update_failure.update(key=key, at=time.time(), result=result)
+        return _public_update_info(result)
+    _update_failure.clear()
+    if st["upToDate"] and installed != st["latest"]["sha"]:
+        _save_config(installedCommit=st["latest"]["sha"])  # los archivos ya son esa versión
+    _save_config(updateCheck=st)
+    return _public_update_info({"status": st})
+
+
+def update_config(body: dict) -> dict:
+    repo = str(body.get("repo") or "").strip() or selfupdate.DEFAULT_REPO
+    branch = str(body.get("branch") or "").strip() or selfupdate.DEFAULT_BRANCH
+    if not selfupdate.valid_repo(repo):
+        raise ValueError("El repositorio tiene que tener la forma usuario/repositorio")
+    if not selfupdate.valid_branch(branch):
+        raise ValueError("Nombre de rama inválido")
+    changes = {"updateRepo": repo, "updateBranch": branch, "updateCheck": None}
+    token = str(body.get("token") or "").strip()
+    if body.get("clearToken"):
+        changes["githubToken"] = None
+    elif token:
+        if not re.fullmatch(r"[A-Za-z0-9_]{20,255}", token):
+            raise ValueError("Ese token no parece válido. Copialo completo desde GitHub.")
+        changes["githubToken"] = token
+    _save_config(**changes)
+    return _public_update_info()
+
+
+def _set_job(**fields) -> None:
+    with _update_lock:
+        _update_job.update(fields)
+
+
+def _finish_and_restart(result: dict) -> None:
+    if result.get("requirementsChanged"):
+        _set_job(stage="libraries")
+        desktop.update_libraries(APP_DIR / "requirements.txt")
+        if desktop.IS_WINDOWS and (APP_DIR / "requirements-windows.txt").exists():
+            desktop.update_libraries(APP_DIR / "requirements-windows.txt")
+    if _restart_hook is not None:
+        _set_job(stage="restarting")
+        threading.Timer(1.5, _restart_hook).start()  # deja que la página lea el estado antes
+    else:
+        _set_job(stage="done", needsManualRestart=True)
+
+
+def _run_update() -> None:
+    repo, branch, token, installed = _update_settings()
+    try:
+        result = selfupdate.apply(APP_DIR, DATA_DIR, repo, branch, token, installed,
+                                  progress=lambda stage: _set_job(stage=stage))
+        _save_config(installedCommit=result["sha"], updateCheck=None)
+        log.info("Actualizado a %s (%d archivos): %s", result["sha"][:7], len(result["updated"]), ", ".join(result["updated"]))
+        _set_job(updated=result["updated"], sha=result["sha"])
+        if not result["updated"]:
+            _set_job(stage="done", needsManualRestart=False)
+            return
+        _finish_and_restart(result)
+    except selfupdate.UpdateError as exc:
+        log.warning("Actualización cancelada: %s", exc)
+        _set_job(stage="error", error=str(exc), needsToken=exc.needs_token)
+    except Exception as exc:
+        log.error("Actualización falló: %s", exc, exc_info=True)
+        _set_job(stage="error", error=_friendly_error(exc))
+
+
+def start_update(kind: str = "update") -> dict:
+    with _update_lock:
+        if _update_job.get("stage") in ("checking", "downloading", "verifying", "backup", "installing", "libraries"):
+            return dict(_update_job)
+        _update_job.clear()
+        _update_job.update({"kind": kind, "stage": "checking", "startedAt": time.time()})
+    if kind == "rollback":
+        def run():
+            try:
+                result = selfupdate.rollback(APP_DIR, DATA_DIR)
+                _save_config(installedCommit=result.get("sha"), updateCheck=None)
+                log.info("Vuelta a la versión anterior (%d archivos)", len(result["restored"]))
+                _set_job(updated=result["restored"], sha=result.get("sha"))
+                _finish_and_restart(result)
+            except selfupdate.UpdateError as exc:
+                _set_job(stage="error", error=str(exc))
+            except Exception as exc:
+                log.error("No se pudo volver a la versión anterior: %s", exc, exc_info=True)
+                _set_job(stage="error", error=_friendly_error(exc))
+        threading.Thread(target=run, daemon=True).start()
+    else:
+        threading.Thread(target=_run_update, daemon=True).start()
+    return dict(_update_job)
+
+
 # ---------------------------------------------------------------- errores
 
 
@@ -1516,7 +1657,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(save_eq(self._body()))
 
         if parts == ["status"] and method == "GET":
-            return self._json({**library_status(), "log": str(LOG_FILE)})
+            _, _, _, installed = _update_settings()
+            return self._json({**library_status(), "log": str(LOG_FILE), "version": installed[:7] if installed else None})
+
+        if parts and parts[0] == "update":
+            if parts == ["update", "status"] and method == "GET":
+                return self._json(update_status(refresh=q("refresh") == "1"))
+            if parts == ["update", "config"] and method == "POST":
+                return self._json(update_config(self._body()))
+            if parts == ["update", "apply"] and method == "POST":
+                return self._json(start_update("update"))
+            if parts == ["update", "rollback"] and method == "POST":
+                return self._json(start_update("rollback"))
+            if parts == ["update", "job"] and method == "GET":
+                with _update_lock:
+                    return self._json(dict(_update_job))
 
         if parts == ["config"]:
             if method == "GET":
@@ -1790,9 +1945,12 @@ def _run_background(server: ThreadingHTTPServer, url: str, silent: bool) -> None
         on_folder=lambda: open_folder(download_dir()),
         autostart_get=desktop.autostart_enabled,
         autostart_set=lambda on: desktop.set_autostart(on, APP_DIR),
+        on_update=lambda: open_browser(url + "/?vista=actualizar"),  # la app instalada no recibe el enlace
         notify_text=("RiPlay sigue funcionando acá, junto al reloj. Clic derecho para ver las opciones."
                      if first_time else None),
     )
+    global _restart_hook
+    _restart_hook = lambda: tray.stop("restart")
     updater = desktop.Updater(APP_DIR / "requirements.txt", is_idle=is_idle,
                               request_restart=lambda: tray.stop("restart"))
     updater.start()
