@@ -31,7 +31,7 @@ UA = "RiPlayWeb-updater/1.0"
 TEXT_EXT = {".py", ".js", ".css", ".html", ".md", ".txt", ".bat", ".sh", ".svg", ".webmanifest", ".json", ".patch"}
 SKIP_PREFIXES = (".git", ".github/", "extras/")
 PROTECTED_NAMES = {"config.json", "playlists.json", "downloads.json", "eq.json", "history.json", "dislikes.json"}
-PROTECTED_PREFIXES = (".venv/", "lyrics/", "backups/", "riplay.log")
+PROTECTED_PREFIXES = (".venv/", "lyrics/", "backups/", "cache/", "riplay.log")
 MAX_ZIP = 80 * 1024 * 1024
 KEEP_BACKUPS = 3
 

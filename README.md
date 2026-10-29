@@ -72,6 +72,17 @@ access** elegí solo este repositorio y en **Permissions → Contents** poné **
 
 ## Cómo se usa
 
+- **Inicio:** es lo primero que se abre. Se arma solo con lo que escuchás:
+  - **Seguir escuchando:** lo último que pusiste, para retomarlo con un toque.
+  - **Tus mixes del día:** un mix por cada artista que más escuchás, con canciones parecidas de
+    otros artistas. Tocá la tarjeta para ver las canciones o el botón ▶ para ponerlo directo.
+  - **Tus artistas:** abre su discografía. **Novedades de tus artistas:** lo que sacaron este año
+    y el anterior.
+  - **Para descubrir:** canciones parecidas a las tuyas que todavía no escuchaste nunca.
+  - **Lo que más escuchás** y **Tus listas**.
+  - Las recomendaciones se renuevan una vez por día (o con **Actualizar**). Lo que marcás "No me
+    gusta" no aparece. RiPlay reconoce al artista aunque el video lo haya subido un sello o
+    cualquier usuario (por ejemplo "Korn - Blind" subido por otro canal cuenta para Korn).
 - **Buscar:** escribí y apretá Buscar (o Enter).
   - **YouTube** (la opción por defecto) busca igual que el buscador de YouTube, sin filtros:
     videos, Shorts, listas y canales, 30 por vez con **Cargar más resultados**.
@@ -135,7 +146,7 @@ access** elegí solo este repositorio y en **Permissions → Contents** poné **
   así que cualquier otro reproductor las reconoce.
 - **Listas y configuración:** carpeta `RiPlayWeb` en tu usuario (`playlists.json`, `config.json`,
   `eq.json`, `history.json`, `dislikes.json`; las letras ya buscadas en `lyrics/` y las copias de
-  versiones anteriores en `backups/`).
+  versiones anteriores en `backups/`; las recomendaciones del día en `cache/`).
   Copiá esa carpeta para tener un respaldo.
 
 ## Si algo falla

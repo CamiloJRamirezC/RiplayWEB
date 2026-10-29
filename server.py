@@ -32,6 +32,7 @@ sys.path.insert(0, str(APP_DIR))
 import spotify_import as spi  # noqa: E402
 import desktop  # noqa: E402
 import selfupdate  # noqa: E402
+import home  # noqa: E402
 STATIC_DIR = APP_DIR / "static"
 DATA_DIR = Path(os.environ.get("RIPLAY_DATA", Path.home() / "RiPlayWeb"))
 HOST = "127.0.0.1"
@@ -1311,6 +1312,189 @@ def get_lyrics(track: dict) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- inicio
+
+HOME_VERSION = 1
+HOME_CACHE = DATA_DIR / "cache" / "home.json"
+ARTIST_RESOLVE_TTL = 14 * 86400   # nombre → artista de YouTube Music
+ARTIST_MISS_TTL = 3 * 86400       # nombres que no son artistas: se reintenta cada tanto
+_home_lock = threading.Lock()
+
+
+def _home_inputs():
+    history = _read_json("history.json", [])
+    playlists = load_playlists()
+    fav = next((p for p in playlists if p.get("special") == "favorites"), None)
+    disliked = {track_key(t) for t in load_dislikes()}
+    return history, playlists, fav, disliked
+
+
+def home_local() -> dict:
+    """Lo que sale solo de tus datos: instantáneo y sin internet."""
+    history, playlists, fav, disliked = _home_inputs()
+    return {
+        "hasHistory": bool(history),
+        "recent": home.recent_tracks(history, 12),
+        "top": home.top_tracks(history),
+        "week": home.week_stats(history),
+        "playlists": [{"id": p["id"], "name": p["name"], "count": len(p["tracks"]), "special": p.get("special"),
+                       "thumbs": [t["thumb"] for t in p["tracks"] if t.get("thumb")][:4]} for p in playlists],
+    }
+
+
+def _read_home_cache() -> dict:
+    try:
+        data = json.loads(HOME_CACHE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_home_cache(data: dict) -> None:
+    try:
+        HOME_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = HOME_CACHE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, HOME_CACHE)
+    except OSError as exc:
+        log.warning("No se pudo guardar el inicio: %s", exc)
+
+
+def _artist_info(cid: str) -> dict | None:
+    raw = _get_artist_raw(cid)
+    return {"id": cid, "name": raw.get("name") or "", "thumb": _thumb(raw.get("thumbnails"), 400)}
+
+
+def _resolve_artist(cand: dict, known: dict) -> dict | None:
+    """Confirma en YouTube Music que el nombre es un artista. Usa y llena `known` (caché persistente)."""
+    hit = known.get(cand["key"])
+    if hit and time.time() - hit.get("at", 0) < (ARTIST_RESOLVE_TTL if hit.get("id") else ARTIST_MISS_TTL):
+        return hit if hit.get("id") else None
+    found = None
+    if cand.get("artistId"):
+        try:
+            found = _artist_info(cand["artistId"])
+        except Exception as exc:
+            log.info("Artista %s sin página (%s)", cand["artistId"], exc)
+    if not found:
+        for r in ytmusic().search(cand["name"], filter="artists", limit=5)[:3]:
+            cid = r.get("browseId")
+            name = r.get("artist") or r.get("title") or ""
+            if re.fullmatch(r"UC[\w-]{22}", str(cid or "")) and home.names_match(cand["name"], name):
+                found = {"id": cid, "name": name, "thumb": _thumb(r.get("thumbnails"), 400)}
+                break
+    known[cand["key"]] = {**(found or {}), "at": time.time()}
+    return found
+
+
+def _artist_releases(artist: dict, min_year: int) -> list[dict]:
+    raw = _get_artist_raw(artist["id"])
+    out = []
+    for section in ("albums", "singles"):
+        for i, r in enumerate((raw.get(section) or {}).get("results") or []):
+            rel = _release(r, section, i)
+            if rel and rel["year"] and rel["year"] >= min_year:
+                out.append({**rel, "artist": artist["name"], "artistId": artist["id"]})
+    out.sort(key=lambda r: (-r["year"], r["kind"] == "album", r["rank"]))  # lo más nuevo primero
+    return out[:2]
+
+
+def _build_feed(history, playlists, fav, disliked, known: dict) -> dict:
+    favorites = fav["tracks"] if fav else []
+    others = [p["tracks"] for p in playlists if p is not fav]
+    cands = home.artist_candidates(history, favorites, others, disliked)[:14]
+    errors = []
+    pool = ThreadPoolExecutor(max_workers=4)
+    try:
+        # 1) artistas confirmados en YouTube Music, sin repetir (Korn y KoRn son el mismo)
+        artists, seen = [], set()
+        if ytm_usable():
+            def resolve(c):
+                try:
+                    return _resolve_artist(c, known)
+                except Exception as exc:
+                    errors.append(exc)
+                    return None
+            for cand, found in zip(cands, pool.map(resolve, cands)):
+                if found and found["id"] not in seen:
+                    seen.add(found["id"])
+                    artists.append({**found, "seeds": cand["seeds"], "plays": cand["plays"]})
+        artists = artists[:10]
+
+        # 2) un mix por artista: radios de tus canciones más escuchadas de ese artista
+        def radios(seeds):
+            out = []
+            for seed in seeds[:2]:
+                try:
+                    out.append(radio(seed["id"]))
+                except Exception as exc:
+                    errors.append(exc)
+            return out
+        mix_sources = artists[:6] if artists else [
+            {"id": None, "name": c["name"], "thumb": None, "seeds": c["seeds"]} for c in cands[:4]]
+        mixes = []
+        for src, lists in zip(mix_sources, pool.map(lambda a: radios(a["seeds"]), mix_sources)):
+            seed = src["seeds"][0] if src["seeds"] else None
+            tracks = home.interleave([[seed]] + lists if seed else lists, 50, skip=disliked)
+            if len(tracks) < 6:
+                continue
+            mixes.append({
+                "id": "mix-" + (src["id"] or home.artist_key(src["name"]).replace(" ", "-")),
+                "title": f"Mix de {src['name']}", "artist": src["name"], "artistId": src["id"],
+                "subtitle": home.mix_subtitle(tracks, src["name"]),
+                "thumb": src.get("thumb") or (seed or {}).get("thumb"), "tracks": tracks,
+            })
+
+        # 3) para descubrir: de los mixes, lo que nunca escuchaste
+        heard = {home.track_key(e["track"]) for e in history} | {home.track_key(t) for t in favorites}
+        discover = home.interleave([[t for t in m["tracks"] if home.track_key(t) not in heard] for m in mixes],
+                                   30, skip=disliked)
+
+        # 4) novedades: lanzamientos de este año y el anterior de tus artistas
+        min_year = int(time.strftime("%Y")) - 1
+        def releases(a):
+            try:
+                return _artist_releases(a, min_year)
+            except Exception as exc:
+                errors.append(exc)
+                return []
+        news = [r for lst in pool.map(releases, artists[:8]) for r in lst]
+        news.sort(key=lambda r: (-r["year"], r["rank"]))
+    finally:
+        pool.shutdown(wait=False)
+
+    if errors:
+        log.warning("Inicio: %d consultas fallaron (la primera: %s)", len(errors), errors[0])
+    if not artists and not mixes and errors:
+        raise errors[0]
+    return {
+        "artists": [{k: a[k] for k in ("id", "name", "thumb", "plays")} for a in artists],
+        "mixes": mixes, "discover": discover, "releases": news[:12],
+    }
+
+
+def home_feed(refresh: bool = False) -> dict:
+    """Recomendaciones del día. Se arman una vez por día (o al tocar Actualizar) y se guardan."""
+    today = time.strftime("%Y-%m-%d")
+    with _home_lock:
+        cache = _read_home_cache()
+        history, playlists, fav, disliked = _home_inputs()
+        feed = cache.get("feed")
+        if refresh or not feed or cache.get("date") != today or cache.get("version") != HOME_VERSION:
+            if not history and not (fav and fav["tracks"]) and not any(p["tracks"] for p in playlists):
+                return {"empty": True, "artists": [], "mixes": [], "discover": [], "releases": []}
+            known = cache.get("artists") or {}
+            feed = _build_feed(history, playlists, fav, disliked, known)
+            cache = {"version": HOME_VERSION, "date": today, "generatedAt": time.time(), "feed": feed,
+                     "artists": {k: v for k, v in known.items() if time.time() - v.get("at", 0) < ARTIST_RESOLVE_TTL}}
+            _write_home_cache(cache)
+    # lo que marcaste "No me gusta" después de armarlo tampoco aparece
+    clean = lambda ts: [t for t in ts if track_key(t) not in disliked]
+    return {**feed, "generatedAt": cache.get("generatedAt"),
+            "mixes": [{**m, "tracks": clean(m["tracks"])} for m in feed["mixes"]],
+            "discover": clean(feed["discover"])}
+
+
 # ---------------------------------------------------------------- actualizar desde GitHub
 
 _restart_hook = None          # en segundo plano: reinicia el servicio (lo define _run_background)
@@ -1602,6 +1786,10 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and parts == ["collection"]:
             page = max(1, min(100, int(q("page", "1") or 1)))
             return self._json(collection(q("kind"), q("id"), page))
+        if method == "GET" and parts == ["home"]:
+            return self._json(home_local())
+        if method == "GET" and parts == ["home", "feed"]:
+            return self._json(home_feed(refresh=q("refresh") == "1"))
         if method == "GET" and len(parts) == 2 and parts[0] == "radio":
             return self._json(radio(parts[1]))
         if method == "GET" and len(parts) == 2 and parts[0] == "stream":

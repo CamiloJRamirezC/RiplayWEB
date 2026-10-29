@@ -68,7 +68,7 @@ function toast(msg) {
 /* ============================================================ estado */
 
 const state = {
-  view: ["col", "artist"].includes(store.get("view", "search")) ? "search" : store.get("view", "search"),
+  view: "home", // siempre arranca en Inicio
   dislikes: [],
   history: null,
   historyTab: "played",
@@ -97,6 +97,7 @@ function setView(view) {
   store.set("view", view);
   closeMenu();
   render();
+  if (view === "home") loadHome();
   $("#main").focus({ preventScroll: true });
   $("#main").scrollTop = 0;
 }
@@ -139,20 +140,21 @@ function render() {
 }
 
 function renderView(main) {
-  if (state.view === "search") main.replaceChildren(renderSearch());
+  if (state.view === "home") main.replaceChildren(renderHome());
+  else if (state.view === "search") main.replaceChildren(renderSearch());
   else if (state.view === "local") main.replaceChildren(renderLocal());
   else if (state.view === "history") main.replaceChildren(renderHistory());
   else if (state.view === "artist") {
-    if (!state.artist) { state.view = "search"; return renderView(main); }
+    if (!state.artist) { state.view = "home"; return renderView(main); }
     main.replaceChildren(renderArtist());
   }
   else if (state.view === "col") {
-    if (!state.collection) { state.view = "search"; return renderView(main); }
+    if (!state.collection) { state.view = "home"; return renderView(main); }
     main.replaceChildren(renderCollection());
   }
   else if (state.view.startsWith("pl:")) {
     const pl = state.playlists.find((p) => "pl:" + p.id === state.view);
-    if (!pl) { state.view = "search"; return render(); }
+    if (!pl) { state.view = "home"; return render(); }
     main.replaceChildren(renderPlaylist(pl));
   }
 }
@@ -510,10 +512,11 @@ function renderCollection() {
     el("div", { class: "toolbar" },
       playable.length ? el("button", { class: "btn primary", onclick: () => playList(playable, 0) }, icon("play"), "Reproducir todo") : null,
       playable.length ? el("button", { class: "btn", onclick: () => saveCollectionAsPlaylist(c) }, icon("plus"), "Guardar como lista") : null));
-  const label = c.kind === "channel" ? "Videos del canal"
+  const label = c.kind === "mix" ? c.artist || "Mix"
+    : c.kind === "channel" ? "Videos del canal"
     : c.kind === "album" ? [RELEASE_LABEL[c.releaseKind] || "Álbum", c.year, c.artist].filter(Boolean).join(" · ")
     : ["Lista de YouTube", c.artist].filter(Boolean).join(" · ");
-  const unit = c.kind === "album" ? (c.tracks.length === 1 ? "canción" : "canciones") : "videos";
+  const unit = c.kind === "album" || c.kind === "mix" ? (c.tracks.length === 1 ? "canción" : "canciones") : "videos";
   const count = c.tracks.length ? ` · ${c.tracks.length}${c.hasMore ? "+" : ""} ${unit}` : "";
   const sub = el("p", { class: "view-sub", text: label + count });
   let body;
@@ -564,9 +567,9 @@ function artistRow(item) {
     el("div", { class: "track-actions" }, el("button", { class: "btn", onclick: open }, "Ver artista")));
 }
 
-function openArtist(item) {
+function openArtist(item, back = null) {
   state.artist = {
-    id: item.id, name: item.title || "", thumb: item.thumb, data: null, loading: true, error: null,
+    id: item.id, name: item.title || "", thumb: item.thumb, data: null, loading: true, error: null, back,
     filter: "all", sort: store.get("artistSort", "year-desc"), popOrder: null, popLoading: false,
   };
   setView("artist");
@@ -633,8 +636,8 @@ function sortedReleases(a) {
   return list;
 }
 
-function releaseCard(r, a) {
-  const open = () => openAlbum(r, a);
+function releaseCard(r, a, back = null) {
+  const open = () => openAlbum(r, a, back);
   const meta = [RELEASE_LABEL[r.kind], r.year].filter(Boolean).join(" · ");
   return el("li", { class: "release" },
     el("button", { class: "release-hit", onclick: open, title: `Ver ${r.title}` },
@@ -645,11 +648,11 @@ function releaseCard(r, a) {
         r.likes ? el("span", { class: "release-likes", title: `${r.likes} en Favoritos` }, icon("heart-fill"), String(r.likes)) : null)));
 }
 
-function openAlbum(r, a) {
+function openAlbum(r, a, back = null) {
   state.collection = {
     kind: "album", id: r.id, title: r.title, artist: a ? a.name : "", thumb: r.thumb, year: r.year, releaseKind: r.kind,
     tracks: [], page: 0, hasMore: true, loading: false, error: null,
-    back: a ? { view: "artist", label: `Volver a ${a.name}` } : null,
+    back: back || (a ? { view: "artist", label: `Volver a ${a.name}` } : null),
   };
   setView("col");
   loadCollectionPage();
@@ -657,7 +660,8 @@ function openAlbum(r, a) {
 
 function renderArtist() {
   const a = state.artist;
-  const back = el("button", { class: "text-btn back-btn", onclick: () => setView("search") }, "← Volver a la búsqueda");
+  const back = el("button", { class: "text-btn back-btn", onclick: () => setView(a.back ? a.back.view : "search") },
+    "← " + (a.back ? a.back.label : "Volver a la búsqueda"));
   const cover = a.thumb ? el("img", { class: "artist-photo", src: a.thumb, alt: "", referrerpolicy: "no-referrer" })
     : el("div", { class: "artist-photo blank" }, icon("artist"));
   const d = a.data;
@@ -1598,6 +1602,7 @@ if ("serviceWorker" in navigator) {
 {
   const vista = new URLSearchParams(location.search).get("vista");
   if (vista === "buscar") state.view = "search";
+  if (vista === "inicio") state.view = "home";
   if (vista === "disco") state.view = "local";
   if (vista && vista !== "actualizar") history.replaceState(null, "", "/"); // "actualizar" lo maneja update.js
 }
@@ -1612,10 +1617,11 @@ if ("serviceWorker" in navigator) {
   }
   renderQueue();
   render();
+  if (state.view === "home") loadHome();
   await loadPlaylists();
   updateLikeCurrent();
   loadDislikes().then(() => { if (state.dislikes.length) render(); });
   api("config").then((c) => { state.config = c; }).catch(() => {});
-  api("status").then((st) => { state.status = st; if (state.view === "search") render(); }).catch(() => {});
+  api("status").then((st) => { state.status = st; if (state.view === "search" || state.view === "home") render(); }).catch(() => {});
   pollDownloads();
 })();

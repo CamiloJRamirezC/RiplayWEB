@@ -11,6 +11,7 @@ eq.json
 history.json
 dislikes.json
 lyrics/
+cache/
 riplay.log*
 *.tmp
 backups/

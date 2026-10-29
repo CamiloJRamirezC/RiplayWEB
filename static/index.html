@@ -29,6 +29,7 @@
     <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M5 11V9.5A2.5 2.5 0 0 1 7.5 7H19m0 0-2.5-2.5M19 7l-2.5 2.5M19 13v1.5a2.5 2.5 0 0 1-2.5 2.5H5m0 0 2.5 2.5M5 17l2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="m16 9.5 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M4.5 10.2 12 4l7.5 6.2V19a1 1 0 0 1-1 1h-4.2v-5.6H9.7V20H5.5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15 15 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-disk" viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h3l2 2h6A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M5 7h10M5 12h10M5 17h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="18" cy="16.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M20.5 16.5V8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
@@ -49,6 +50,7 @@
   <div class="app">
     <nav class="side" aria-label="Secciones">
       <div class="brand">RiPlay</div>
+      <button class="nav-item" data-view="home"><svg><use href="#i-home"/></svg><span>Inicio</span></button>
       <button class="nav-item" data-view="search"><svg><use href="#i-search"/></svg><span>Buscar</span></button>
       <button class="nav-item" data-view="local"><svg><use href="#i-disk"/></svg><span>En el disco</span><b class="nav-badge" id="dl-badge" hidden></b></button>
       <button class="nav-item" data-view="history"><svg><use href="#i-history"/></svg><span>Historial</span></button>
@@ -206,6 +208,7 @@
   <div id="menu" class="menu" role="menu" hidden></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <audio id="audio" preload="auto"></audio>
+  <script src="/home.js"></script>
   <script src="/app.js"></script>
   <script src="/eq.js"></script>
   <script src="/nowplaying.js"></script>
