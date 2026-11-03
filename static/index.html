@@ -30,6 +30,7 @@
     <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="m16 9.5 5 5m0-5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-home" viewBox="0 0 24 24"><path d="M4.5 10.2 12 4l7.5 6.2V19a1 1 0 0 1-1 1h-4.2v-5.6H9.7V20H5.5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
+    <symbol id="i-mini" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.9"/><rect x="11.5" y="11" width="7" height="5.5" rx="1.2" fill="currentColor"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="m15 15 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
     <symbol id="i-disk" viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h3l2 2h6A2.5 2.5 0 0 1 20 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/></symbol>
     <symbol id="i-list" viewBox="0 0 24 24"><path d="M5 7h10M5 12h10M5 17h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="18" cy="16.5" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M20.5 16.5V8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
@@ -103,6 +104,7 @@
         <button class="icon-btn" id="btn-mute" aria-label="Silenciar"><svg><use href="#i-volume"/></svg></button>
         <input type="range" id="volume" class="volume" min="0" max="1" step="0.01" value="1" aria-label="Volumen">
         <button class="icon-btn" id="btn-dl-current" title="Descargar esta canción" aria-label="Descargar esta canción" disabled><svg><use href="#i-download"/></svg></button>
+        <button class="icon-btn" id="btn-mini" title="Mini reproductor (queda encima de las demás ventanas)" aria-label="Abrir el mini reproductor" aria-pressed="false" hidden><svg><use href="#i-mini"/></svg></button>
         <button class="icon-btn" id="btn-np" title="Portada, video y letra" aria-label="Ver portada, video y letra" aria-expanded="false" aria-controls="np-panel"><svg><use href="#i-lyrics"/></svg></button>
         <button class="icon-btn" id="btn-eq" title="Ecualizador" aria-label="Ecualizador" aria-expanded="false" aria-controls="eq-panel"><svg><use href="#i-eq"/></svg></button>
         <button class="icon-btn" id="btn-queue" title="Cola" aria-label="Mostrar cola"><svg><use href="#i-queue"/></svg></button>
@@ -213,5 +215,6 @@
   <script src="/eq.js"></script>
   <script src="/nowplaying.js"></script>
   <script src="/update.js"></script>
+  <script src="/mini.js"></script>
 </body>
 </html>

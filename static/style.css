@@ -547,7 +547,7 @@ ul.hint { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; m
 .np-line.np-gap { font-size: 18px; }
 .np-plain { margin: 0; font-size: 19px; line-height: 1.55; color: var(--ink); }
 .np-empty { color: var(--ink-2); font-size: 18px; margin-top: 10vh; }
-#btn-np.on { color: var(--accent); }
+#btn-np.on, #btn-mini.on { color: var(--accent); }
 @media (max-width: 860px) {
   .np-panel { padding: 14px 16px 0; }
   .np-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); gap: 14px; }

@@ -133,6 +133,12 @@ access** elegí solo este repositorio y en **Permissions → Contents** poné **
   - Se recuerda entre sesiones. Si suena saturado, bajá un poco el **Pre**.
   - Funciona con lo que suena online y con lo descargado. Las canciones descargadas se guardan
     sin ecualizar: el ecualizador se aplica al escuchar.
+- **Mini reproductor:** el botón de la ventanita en el reproductor (junto al de la letra) abre un
+  reproductor chico que queda **encima de todas las ventanas**, con portada, progreso y los botones
+  No me gusta, Anterior, Play/Pausa, Siguiente y Me gusta. Movelo y cambiale el tamaño con el
+  mouse: si la hacés baja queda en una fila. Se cierra con su ✕ o con el mismo botón; la música
+  sigue. Funciona en Chrome y Edge (también con RiPlay instalado como app). La ventana principal
+  puede estar minimizada, pero no cerrada.
 - **Cola:** botón de la derecha en el reproductor. Si dejás marcada la opción
   "Seguir con canciones parecidas", al terminar la cola sigue sola.
 - **En el disco:** lo que descargaste, la carpeta donde se guarda y el progreso de las descargas.
