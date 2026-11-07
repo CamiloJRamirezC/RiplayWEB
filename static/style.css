@@ -337,6 +337,7 @@ ul.hint { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; m
 .player {
   position: fixed; left: 0; right: 0; bottom: 0; height: var(--player-h);
   background: var(--surface); border-top: 1px solid var(--line);
+  z-index: 24; /* siempre delante de la cola, el inicio y el panel de video y letra */
 }
 .seek {
   --p: 0%;
@@ -510,7 +511,7 @@ ul.hint { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; m
 /* ------------------------------------------------ reproduciendo: portada/video + letra */
 .np-panel {
   position: fixed; left: 0; right: 0; top: 0; bottom: var(--player-h); z-index: 22;
-  background: var(--bg); display: flex; flex-direction: column; padding: 18px 32px 0;
+  background: var(--bg); display: flex; flex-direction: column; padding: 18px 32px 0; overflow: hidden;
 }
 .np-head { display: flex; align-items: center; gap: 16px; padding-bottom: 14px; }
 .np-head h2 { margin: 0 auto 0 0; font: 800 26px/1 var(--display); letter-spacing: -.02em; }
