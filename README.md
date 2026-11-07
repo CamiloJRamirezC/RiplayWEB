@@ -112,6 +112,14 @@ access** elegí solo este repositorio y en **Permissions → Contents** poné **
   - **Ver video:** si es un video de YouTube, podés ver el video en lugar de la portada. El sonido
     sigue saliendo igual (con el ecualizador); el video solo acompaña. La opción se recuerda.
   - Las letras salen de LRCLIB (gratis, sin cuenta) o, si no está, de YouTube Music.
+  - **Pantalla completa:** el botón ⛶ sobre el video o la portada (o la tecla **F**, o doble clic).
+    Muestra la letra que suena como subtítulo (con su traducción si está activada), y los botones
+    No me gusta, Anterior, Play/Pausa, Siguiente y Me gusta. Los controles se esconden solos a los
+    3 segundos; mové el mouse para verlos. **Esc** sale.
+  - **Traducir:** el botón **Traducir** junto a "Letra" muestra la traducción debajo de cada línea,
+    al idioma que elijas en la lista (español, inglés, portugués, guaraní y otros). Si la letra ya
+    está en ese idioma, lo avisa. Usa el traductor de Google (necesita internet); cada traducción
+    se guarda, así la segunda vez es instantánea. El idioma y si está activada se recuerdan.
 - **Historial:** en la barra lateral. Lo que escuchaste (al menos 30 segundos), agrupado por día y
   con la hora. Se puede quitar una entrada o borrar todo. La pestaña **No me gusta** muestra las que
   marcaste, para deshacerlo.

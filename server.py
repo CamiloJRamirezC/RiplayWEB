@@ -6,6 +6,7 @@ Escucha solo en 127.0.0.1 (tu propia compu).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from html import escape as html_escape
@@ -22,6 +23,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import webbrowser
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
@@ -1312,6 +1314,97 @@ def get_lyrics(track: dict) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- traducir letras
+
+TRANSLATE_URL = os.environ.get("RIPLAY_TRANSLATE_URL", "https://translate.googleapis.com/translate_a/single")
+TRANSLATE_LANGS = {
+    "es": "Español", "en": "English", "pt": "Português", "it": "Italiano", "fr": "Français", "de": "Deutsch",
+    "gn": "Guaraní", "ja": "日本語", "ko": "한국어", "zh-CN": "中文", "ru": "Русский", "nl": "Nederlands",
+    "pl": "Polski", "tr": "Türkçe", "sv": "Svenska", "ar": "العربية", "hi": "हिन्दी",
+}
+TRANSLATE_CHUNK = 3500  # caracteres por pedido
+
+
+def _translate_text(text: str, target: str) -> tuple[str, str]:
+    """Traduce un bloque (las líneas separadas por saltos). Devuelve (traducción, idioma detectado)."""
+    body = urllib.parse.urlencode({"q": text}).encode("utf-8")
+    url = TRANSLATE_URL + "?" + urllib.parse.urlencode({"client": "gtx", "sl": "auto", "tl": target, "dt": "t", "ie": "UTF-8", "oe": "UTF-8"})
+    req = urllib.request.Request(url, data=body, headers={
+        "User-Agent": "Mozilla/5.0", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            raise RuntimeError("El traductor recibió demasiados pedidos seguidos. Probá en unos minutos.") from exc
+        raise RuntimeError(f"El traductor respondió con un error ({exc.code}).") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError("No se pudo conectar con el traductor. ¿Hay internet?") from exc
+    except ValueError as exc:
+        raise RuntimeError("El traductor devolvió algo que no se entiende.") from exc
+    parts = data[0] if isinstance(data, list) and data and isinstance(data[0], list) else []
+    translated = "".join(str(seg[0]) for seg in parts if isinstance(seg, list) and seg and seg[0])
+    detected = data[2] if len(data) > 2 and isinstance(data[2], str) else ""
+    return translated, detected
+
+
+def _translate_lines(lines: list[str], target: str) -> tuple[list[str], str]:
+    """Traduce línea por línea, manteniendo la correspondencia (las vacías y los ♪ quedan igual)."""
+    out = [""] * len(lines)
+    todo = [(i, ln.strip()) for i, ln in enumerate(lines) if ln.strip() and re.search(r"\w", ln)]
+    chunks, cur, size = [], [], 0
+    for item in todo:
+        if cur and size + len(item[1]) + 1 > TRANSLATE_CHUNK:
+            chunks.append(cur); cur, size = [], 0
+        cur.append(item); size += len(item[1]) + 1
+    if cur:
+        chunks.append(cur)
+    langs: Counter = Counter()
+    for chunk in chunks:
+        text, lang = _translate_text("\n".join(t for _, t in chunk), target)
+        if lang:
+            langs[lang] += len(chunk)
+        got = text.split("\n")
+        if len(got) != len(chunk):  # el traductor juntó o partió líneas: se traduce de a una
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                got = list(pool.map(lambda item: _translate_text(item[1], target)[0], chunk))
+        for (i, _), tr in zip(chunk, got):
+            out[i] = tr.strip()
+    return out, (langs.most_common(1)[0][0] if langs else "")
+
+
+def translate_lyrics(track: dict, target: str) -> dict:
+    if target not in TRANSLATE_LANGS:
+        raise ValueError("Idioma no disponible para traducir")
+    lyr = get_lyrics(track)
+    if not lyr.get("found"):
+        raise ValueError("Esta canción no tiene letra para traducir")
+    lines = [text for _, text in lyr["synced"]] if lyr.get("synced") else (lyr.get("plain") or "").split("\n")
+    if not any(ln.strip() for ln in lines):
+        raise ValueError("Esta canción no tiene letra para traducir")
+    vid = str(track.get("id") or "")
+    artist, title = lyrics_query(track)
+    base = vid if re.fullmatch(r"[\w-]{6,20}", vid) else "t_" + re.sub(r"[^\w-]+", "_", f"{artist}_{title}")[:120]
+    digest = hashlib.sha1("\n".join(lines).encode("utf-8")).hexdigest()[:10]
+    cache_file = DATA_DIR / "lyrics" / f"{base}.tr-{target}.json"
+    try:
+        cached = json.loads(cache_file.read_text(encoding="utf-8"))
+        if cached.get("digest") == digest:
+            return cached
+    except (OSError, ValueError):
+        pass
+    translated, detected = _translate_lines(lines, target)
+    same = bool(detected) and detected.split("-")[0].lower() == target.split("-")[0].lower()
+    out = {"lang": target, "langName": TRANSLATE_LANGS[target], "detected": detected, "same": same,
+           "synced": bool(lyr.get("synced")), "lines": translated, "digest": digest, "source": "Google Traductor"}
+    try:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+    return out
+
+
 # ---------------------------------------------------------------- inicio
 
 HOME_VERSION = 1
@@ -1797,6 +1890,12 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and len(parts) == 2 and parts[0] == "video":
             return self._stream(parts[1], kind="video", codec=q("codec", "avc1"))
 
+        if parts == ["lyrics", "translate"] and method == "GET":
+            track = {k: q(k) for k in ("id", "title", "artist", "album")}
+            track["duration"] = int(q("duration", "0") or 0)
+            return self._json(translate_lyrics(track, q("lang", "es")))
+        if parts == ["lyrics", "languages"] and method == "GET":
+            return self._json([{"code": k, "name": v} for k, v in TRANSLATE_LANGS.items()])
         if parts == ["lyrics"] and method == "GET":
             track = {k: q(k) for k in ("id", "title", "artist", "album")}
             track["duration"] = int(q("duration", "0") or 0)
