@@ -30,6 +30,8 @@ const eq = {
   state: { enabled: false, preset: "flat", gains: EQ_PRESETS[0].gains.slice(), preamp: 0, custom: [] },
   ctx: null,
   source: null,
+  mainGain: null, // volumen del audio normal (las pistas separadas lo bajan a 0)
+  input: null,    // entrada común: audio normal y pistas separadas pasan por acá
   pre: null,
   filters: [],
   limiter: null,
@@ -52,6 +54,10 @@ function eqEnsureGraph() {
   try {
     const ctx = new Ctx();
     eq.source = ctx.createMediaElementSource(audio);
+    eq.mainGain = ctx.createGain();
+    eq.input = ctx.createGain();
+    eq.source.connect(eq.mainGain);
+    eq.mainGain.connect(eq.input);
     eq.pre = ctx.createGain();
     eq.filters = EQ_FREQS.map((f, i) => {
       const node = ctx.createBiquadFilter();
@@ -85,8 +91,8 @@ function eqWire() {
   if (!eq.ctx) return;
   const want = eq.state.enabled ? "eq" : "bypass";
   if (eq.wired === want) return;
-  try { eq.source.disconnect(); } catch { /* no estaba conectado */ }
-  eq.source.connect(want === "eq" ? eq.pre : eq.ctx.destination);
+  try { eq.input.disconnect(); } catch { /* no estaba conectado */ }
+  eq.input.connect(want === "eq" ? eq.pre : eq.ctx.destination);
   eq.wired = want;
 }
 
@@ -100,6 +106,14 @@ function eqApplyToGraph() {
 
 function eqResume() {
   if (eq.ctx && eq.ctx.state === "suspended") eq.ctx.resume().catch(() => {});
+}
+
+// Para otras partes (pistas separadas): la cadena de audio armada y andando
+function eqAudioGraph() {
+  if (!eqEnsureGraph()) return null;
+  eqApplyToGraph();
+  eqResume();
+  return { ctx: eq.ctx, input: eq.input, mainGain: eq.mainGain };
 }
 
 // Se arma la cadena recién cuando hace falta (al reproducir con el ecualizador encendido)

@@ -12,6 +12,8 @@ history.json
 dislikes.json
 lyrics/
 cache/
+stems/
+stems-engine/
 riplay.log*
 *.tmp
 backups/

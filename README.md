@@ -112,6 +112,18 @@ access** elegí solo este repositorio y en **Permissions → Contents** poné **
   - **Ver video:** si es un video de YouTube, podés ver el video en lugar de la portada. El sonido
     sigue saliendo igual (con el ecualizador); el video solo acompaña. La opción se recuerda.
   - Las letras salen de LRCLIB (gratis, sin cuenta) o, si no está, de YouTube Music.
+  - **Separar pistas** (por canción): con la casilla **Separar pistas**, la canción que suena se
+    separa en **voz, batería, bajo, guitarra, piano y otros** y aparece una mesa de mezcla: volumen
+    por pista, **M** (silenciar), **S** (escuchar sola) y atajos **Karaoke (sin voz)**, **Solo voz**,
+    **Sin guitarra**, **Sin batería** y **Sin bajo**. Las demás canciones suenan normal; RiPlay
+    recuerda qué canciones tienen la casilla marcada y su mezcla.
+    - La **primera vez** instala el motor (Demucs, con un Python 3.12 propio en `stems-engine/`):
+      ocupa entre 1 y 3 GB y tarda de 5 a 20 minutos según internet. No toca tu Python.
+    - Cada canción se separa **una sola vez** (queda en `stems/`, unos 15 a 25 MB). Mientras se
+      separa suena normal y, al terminar, pasa sola a las pistas. Con placa NVIDIA tarda segundos;
+      con el procesador, unos minutos. Al terminar dice cuánto tardó.
+    - Funciona con el ecualizador, la pantalla completa y el mini reproductor. **Borrar** quita
+      las pistas de esa canción. Las pistas se leen en Chrome o Edge.
   - **Pantalla completa:** el botón ⛶ sobre el video o la portada (o la tecla **F**, o doble clic).
     Muestra la letra que suena como subtítulo (con su traducción si está activada), y los botones
     No me gusta, Anterior, Play/Pausa, Siguiente y Me gusta. Los controles se esconden solos a los
@@ -160,7 +172,8 @@ access** elegí solo este repositorio y en **Permissions → Contents** poné **
   así que cualquier otro reproductor las reconoce.
 - **Listas y configuración:** carpeta `RiPlayWeb` en tu usuario (`playlists.json`, `config.json`,
   `eq.json`, `history.json`, `dislikes.json`; las letras ya buscadas en `lyrics/` y las copias de
-  versiones anteriores en `backups/`; las recomendaciones del día en `cache/`).
+  versiones anteriores en `backups/`; las recomendaciones del día en `cache/`; las pistas separadas en `stems/` y su motor en
+  `stems-engine/`).
   Copiá esa carpeta para tener un respaldo.
 
 ## Si algo falla

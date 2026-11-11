@@ -35,6 +35,7 @@ import spotify_import as spi  # noqa: E402
 import desktop  # noqa: E402
 import selfupdate  # noqa: E402
 import home  # noqa: E402
+import stems as stems_mod  # noqa: E402
 STATIC_DIR = APP_DIR / "static"
 DATA_DIR = Path(os.environ.get("RIPLAY_DATA", Path.home() / "RiPlayWeb"))
 HOST = "127.0.0.1"
@@ -1314,6 +1315,32 @@ def get_lyrics(track: dict) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- separar pistas
+
+
+def _stems_fetch(track: dict, dest: Path, on_progress=None) -> Path:
+    """Baja solo el audio de la canción para separarlo (no queda en Descargas)."""
+    def hook(d):
+        if on_progress and d.get("status") == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            if total:
+                on_progress(round((d.get("downloaded_bytes") or 0) / total, 3))
+
+    opts = {"format": AUDIO_FORMAT, "outtmpl": str(dest / "source.%(ext)s"), "retries": 5, "progress_hooks": [hook],
+            "fragment_retries": 5, "http_chunk_size": 10 * 1024 * 1024}
+    with youtube_dl(opts) as ydl:
+        info = ydl.extract_info(f"https://www.youtube.com/watch?v={track['id']}", download=True)
+        requested = (info.get("requested_downloads") or [{}])[0]
+        return Path(requested.get("filepath") or ydl.prepare_filename(info))
+
+
+def _stems_local(track: dict) -> Path:
+    return local_path(Path(str(track["local"])).name)
+
+
+STEMS = stems_mod.Stems(DATA_DIR, APP_DIR, log, _stems_fetch, _stems_local)
+
+
 # ---------------------------------------------------------------- traducir letras
 
 TRANSLATE_URL = os.environ.get("RIPLAY_TRANSLATE_URL", "https://translate.googleapis.com/translate_a/single")
@@ -1937,6 +1964,12 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 2 and parts[0] == "local" and method == "GET":
             return self._serve_file(local_path(parts[1]))
 
+        if parts and parts[0] == "stems":
+            try:
+                return self._stems_api(method, parts[1:], q)
+            except stems_mod.StemsError as exc:
+                return self._json({"error": str(exc)}, 400)
+
         if parts == ["eq"]:
             if method == "GET":
                 return self._json(load_eq())
@@ -2120,6 +2153,30 @@ class Handler(BaseHTTPRequestHandler):
                 break
             self.wfile.write(chunk)
 
+    def _stems_api(self, method: str, rest: list[str], q) -> None:
+        if not rest and method == "GET":
+            return self._json(STEMS.status())
+        if rest == ["install"] and method == "POST":
+            return self._json(STEMS.start_install())
+        if rest == ["uninstall"] and method == "POST":
+            return self._json(STEMS.uninstall())
+        if rest == ["track"] and method == "GET":
+            return self._json(STEMS.track_state({"id": q("id"), "local": q("local")}))
+        if rest == ["separate"] and method == "POST":
+            return self._json(STEMS.enqueue(clean_track(self._body().get("track") or {})))
+        if len(rest) == 2 and rest[0] == "cancel" and method == "POST":
+            STEMS.cancel(rest[1])
+            return self._json({"ok": True})
+        if len(rest) == 1 and method == "DELETE":
+            STEMS.delete(rest[0])
+            return self._json({"ok": True})
+        if len(rest) == 3 and rest[0] == "file" and method == "GET":
+            folder = STEMS.song_dir(rest[1])
+            if not re.fullmatch(r"[a-z]+\.(m4a|webm|wav)", rest[2]) or not (folder / rest[2]).is_file():
+                raise FileNotFoundError(rest[2])
+            return self._serve_file(folder / rest[2])
+        raise FileNotFoundError("/".join(rest))
+
     def _serve_file(self, path: Path) -> None:
         _activity["playback"] = time.time()
         size = path.stat().st_size
@@ -2206,6 +2263,8 @@ def is_idle(minutes: float = 10) -> bool:
     with _imports_lock:
         if any(j.get("stage") in ("queued", "reading", "matching") for j in _imports.values()):
             return False
+    if STEMS.busy():
+        return False
     return True
 
 
