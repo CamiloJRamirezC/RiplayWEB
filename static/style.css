@@ -813,3 +813,10 @@ ul.hint { padding-left: 20px; display: flex; flex-direction: column; gap: 6px; m
   .np-stems { flex: 1 1 100%; padding: 12px; }
   .stem-row { grid-template-columns: 64px auto auto minmax(40px, 1fr) 40px; }
 }
+
+/* ------------------------------------------------ ajustes */
+#set-dialog { max-width: 520px; }
+.set-item { display: flex; flex-direction: column; gap: 8px; }
+.set-switch { align-items: flex-start; gap: 12px; font-weight: 700; line-height: 1.35; white-space: normal; }
+.set-switch > span:last-child { white-space: normal; min-width: 0; }
+.set-switch .switch-track { flex: none; margin-top: 2px; }

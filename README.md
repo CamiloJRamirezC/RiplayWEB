@@ -48,6 +48,14 @@ ventana. Desde ahí, el ícono junto al reloj abre directamente esa ventana.
 La app necesita el servicio funcionando. Si alguna vez está apagado, la ventana lo avisa y se
 conecta sola cuando el servicio vuelve. Firefox no permite instalar páginas como app.
 
+### Ajustes
+
+En **Ajustes** (abajo en la barra lateral) está **Que Windows no pause la música mientras RiPlay
+está minimizado**, activado de entrada. Windows, unos auriculares Bluetooth o las teclas multimedia
+a veces mandan la orden de pausar sin que la pidas; con esto RiPlay la ignora mientras su ventana
+no está a la vista (cuando está a la vista, las teclas multimedia pausan normal). Cada una queda
+anotada en `riplay.log` como `pausa-sistema-ignorada`.
+
 ### Actualizar RiPlay
 
 Al pie de la barra lateral está la versión (**RiPlay · versión …**). Si en GitHub hay una versión

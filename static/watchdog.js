@@ -14,10 +14,39 @@ audio.pause = function pause() {
   if (!wd.why) wd.why = "app";
   return wdNativePause();
 };
-if ("mediaSession" in navigator) {
-  // teclas multimedia, auriculares, controles de Windows: esa pausa es a propósito y no se retoma
-  navigator.mediaSession.setActionHandler("pause", () => { wd.why = "sistema"; audio.pause(); });
+wd.ignoreSystem = store.get("ignoreSystemPause", true);
+wd.ignored = 0;
+
+// Windows (teclas multimedia, auriculares, controles de Windows) manda "pausa".
+// Si está activado "Que Windows no pause…", se ignora mientras la ventana de RiPlay no está a la vista.
+function wdSystemPause() {
+  if (wd.ignoreSystem && document.visibilityState === "hidden" && !audio.paused) {
+    wd.ignored++;
+    wdLog("pausa-sistema-ignorada");
+    navigator.mediaSession.playbackState = "playing";
+    return;
+  }
+  wd.why = "sistema";
+  audio.pause();
 }
+if ("mediaSession" in navigator) navigator.mediaSession.setActionHandler("pause", wdSystemPause);
+
+// Ajustes
+const setDlg = $("#set-dialog");
+$("#open-settings").addEventListener("click", () => {
+  $("#set-ignore-system").checked = wd.ignoreSystem;
+  const c = $("#set-ignore-count");
+  c.hidden = !wd.ignored;
+  c.textContent = `Desde que abriste RiPlay, Windows quiso pausar ${wd.ignored} ${wd.ignored === 1 ? "vez" : "veces"} y se ignoró.`;
+  setDlg.showModal();
+});
+$("#set-close").addEventListener("click", () => setDlg.close());
+setDlg.addEventListener("click", (e) => { if (e.target === setDlg) setDlg.close(); });
+$("#set-ignore-system").addEventListener("change", (e) => {
+  wd.ignoreSystem = e.target.checked;
+  store.set("ignoreSystemPause", wd.ignoreSystem);
+  toast(wd.ignoreSystem ? "Windows ya no pausa la música con RiPlay minimizado" : "Windows puede volver a pausar la música");
+});
 
 function wdSnapshot() {
   const t = state.queue[state.index] || {};
