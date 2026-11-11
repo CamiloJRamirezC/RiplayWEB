@@ -7,6 +7,7 @@ Escucha solo en 127.0.0.1 (tu propia compu).
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import logging
 from html import escape as html_escape
@@ -42,6 +43,7 @@ HOST = "127.0.0.1"
 PORT = int(os.environ.get("RIPLAY_PORT", "8765"))
 
 AUDIO_EXT = {".m4a", ".mp3", ".webm", ".opus", ".ogg", ".flac", ".wav", ".aac"}
+UPSTREAM_TIMEOUT = float(os.environ.get("RIPLAY_UPSTREAM_TIMEOUT", "25"))  # segundos sin recibir nada de YouTube
 STREAM_CHUNK = 2 * 1024 * 1024  # YouTube limita la velocidad de peticiones grandes: se pide por bloques
 AUDIO_FORMAT = "bestaudio[ext=m4a]/bestaudio/best"
 
@@ -636,11 +638,15 @@ def _parse_range(header: str | None):
     return start, end
 
 
+class UpstreamCut(Exception):
+    """YouTube cortó una canción a mitad de camino y no se pudo retomar."""
+
+
 def _open_upstream(entry: dict, start: int, end: int):
     req = urllib.request.Request(
         entry["url"], headers={**entry["headers"], "Range": f"bytes={start}-{end}"}
     )
-    return urllib.request.urlopen(req, timeout=25)
+    return urllib.request.urlopen(req, timeout=UPSTREAM_TIMEOUT)
 
 
 # ---------------------------------------------------------------- descargas
@@ -1315,6 +1321,25 @@ def get_lyrics(track: dict) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- registro del reproductor
+
+_client_log_times: list[float] = []
+
+
+def client_log(body: dict) -> dict:
+    """El navegador avisa pausas que nadie pidió, trabas y recuperaciones: quedan en riplay.log."""
+    now = time.time()
+    _client_log_times[:] = [t for t in _client_log_times if now - t < 3600]
+    if len(_client_log_times) >= 120:
+        return {"ok": False}
+    _client_log_times.append(now)
+    event = re.sub(r"[^\w -]", "", str(body.get("event") or ""))[:40]
+    detail = {k: v for k, v in (body.get("detail") or {}).items() if isinstance(v, (str, int, float, bool)) or v is None}
+    text = " ".join(f"{k}={str(v)[:80]}" for k, v in list(detail.items())[:24])
+    log.warning("Reproductor: %s %s", event, text)
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- separar pistas
 
 
@@ -1815,6 +1840,7 @@ class Handler(BaseHTTPRequestHandler):
         return origin in (f"http://{HOST}:{PORT}", f"http://localhost:{PORT}")
 
     def _route(self, method: str):
+        self._headers_done = False
         parsed = urllib.parse.urlparse(self.path)
         path = urllib.parse.unquote(parsed.path)
         query = urllib.parse.parse_qs(parsed.query)
@@ -1826,8 +1852,11 @@ class Handler(BaseHTTPRequestHandler):
             if method == "GET":
                 return self._static(path)
             return self._error("No encontrado", 404)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass  # el navegador cortó (cambió de canción, adelantó o ya tiene suficiente): es normal
+        except UpstreamCut as exc:
+            log.warning("%s", exc)
+            self.close_connection = True
         except KeyError as exc:
             self._safe_error(str(exc).strip("'"), 404)
         except (ValueError, json.JSONDecodeError) as exc:
@@ -1840,10 +1869,18 @@ class Handler(BaseHTTPRequestHandler):
             self._safe_error(_friendly_error(exc), 502)
 
     def _safe_error(self, msg, status):
+        if getattr(self, "_headers_done", False):
+            # ya se estaba mandando una canción: escribir un error acá la corrompería; se corta y el navegador reintenta
+            self.close_connection = True
+            return
         try:
             self._error(msg, status)
         except Exception:
             pass
+
+    def end_headers(self):
+        self._headers_done = True
+        super().end_headers()
 
     def do_GET(self):
         self._route("GET")
@@ -1964,6 +2001,8 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 2 and parts[0] == "local" and method == "GET":
             return self._serve_file(local_path(parts[1]))
 
+        if parts == ["clientlog"] and method == "POST":
+            return self._json(client_log(self._body()))
         if parts and parts[0] == "stems":
             try:
                 return self._stems_api(method, parts[1:], q)
@@ -2118,6 +2157,7 @@ class Handler(BaseHTTPRequestHandler):
             with upstream:
                 content_range = upstream.headers.get("Content-Range")
                 total = int(content_range.rsplit("/", 1)[1]) if content_range and "/" in content_range else None
+                m = re.match(r"bytes (\d+)-(\d+)/", content_range or "")
                 if rng is None and total:
                     # Sin Range (p. ej. abrir el enlace directo): se manda todo el archivo por bloques
                     self.send_response(200)
@@ -2125,12 +2165,13 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_header("Content-Length", str(total))
                     self.send_header("Accept-Ranges", "bytes")
                     self.end_headers()
-                    self._pipe(upstream)
-                    pos = end + 1
+                    first_end = int(m.group(2)) if m else min(end, total - 1)
+                    self._relay(video_id, kind, codec, entry, upstream, start, first_end)
+                    pos = first_end + 1
                     while pos < total:
-                        with _open_upstream(entry, pos, min(pos + STREAM_CHUNK - 1, total - 1)) as nxt:
-                            self._pipe(nxt)
-                        pos += STREAM_CHUNK
+                        block_end = min(pos + STREAM_CHUNK - 1, total - 1)
+                        self._relay(video_id, kind, codec, entry, _open_upstream(entry, pos, block_end), pos, block_end)
+                        pos = block_end + 1
                     return
                 length = upstream.headers.get("Content-Length")
                 self.send_response(206 if content_range else 200)
@@ -2142,9 +2183,47 @@ class Handler(BaseHTTPRequestHandler):
                     self.send_header("Content-Length", length)
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
-                self._pipe(upstream)
+                if m:
+                    self._relay(video_id, kind, codec, entry, upstream, int(m.group(1)), int(m.group(2)))
+                elif length:
+                    self._relay(video_id, kind, codec, entry, upstream, start, start + int(length) - 1)
+                else:
+                    self._pipe(upstream)
                 return
         self._error("No se pudo abrir el audio", 502)
+
+    def _relay(self, video_id, kind, codec, entry, source, start: int, end: int) -> bool:
+        """Manda los bytes [start, end] al navegador. Si YouTube se traba o corta a mitad de camino,
+        vuelve a pedir desde el byte donde quedó (hasta 3 veces): el navegador no se entera."""
+        pos, retries = start, 0
+        try:
+            while pos <= end:
+                try:
+                    chunk = source.read(min(64 * 1024, end - pos + 1))
+                except (TimeoutError, OSError, http.client.HTTPException) as exc:
+                    chunk, cause = b"", exc
+                else:
+                    cause = "terminó antes de tiempo"
+                if chunk:
+                    self.wfile.write(chunk)  # si el navegador cortó, el error sube (no es de YouTube)
+                    pos += len(chunk)
+                    continue
+                if retries >= 3:
+                    raise UpstreamCut(f"YouTube cortó {video_id} en el byte {pos} y no se pudo retomar ({cause})")
+                retries += 1
+                try:
+                    source.close()
+                except Exception:
+                    pass
+                log.info("YouTube se cortó en %s (%s, byte %d: %s): retomo (%d)", video_id, kind, pos, cause, retries)
+                entry = resolve_stream(video_id, force=retries >= 2, kind=kind, codec=codec)
+                source = _open_upstream(entry, pos, end)
+            return True
+        finally:
+            try:
+                source.close()
+            except Exception:
+                pass
 
     def _pipe(self, source) -> None:
         while True:

@@ -769,6 +769,7 @@ async function toggleDislike(t) {
 const listen = { key: null, seconds: 0, last: 0, logged: false };
 
 function resetListen() {
+  if (typeof wd !== "undefined" && wd.recovering) return; // se reabrió la misma canción: sigue contando
   const t = state.queue[state.index];
   listen.key = t ? likeKey(t) : null;
   listen.seconds = 0;
@@ -1478,10 +1479,14 @@ audio.addEventListener("playing", () => $("#btn-play").classList.remove("busy"))
 audio.addEventListener("waiting", () => $("#btn-play").classList.add("busy"));
 audio.addEventListener("play", syncPlayButton);
 audio.addEventListener("pause", syncPlayButton);
-audio.addEventListener("ended", () => next(true));
+audio.addEventListener("ended", () => {
+  if (typeof wdEndedEarly === "function" && wdEndedEarly()) return; // se cortó, no terminó: se retoma
+  next(true);
+});
 audio.addEventListener("error", () => {
   $("#btn-play").classList.remove("busy");
   if (!audio.src || state.index < 0) return;
+  if (typeof wdOnError === "function" && wdOnError()) return; // a mitad de la canción: se retoma
   toast("No se pudo cargar esta canción. Paso a la siguiente.");
   setTimeout(() => next(true), 1200);
 });
